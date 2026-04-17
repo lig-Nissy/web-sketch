@@ -1,5 +1,7 @@
 "use client";
 
+type Mode = "draw" | "select" | "camera";
+
 const COLORS = [
   "#ff6b6b",
   "#4ecdc4",
@@ -12,8 +14,8 @@ const COLORS = [
 ];
 
 interface ControlPanelProps {
-  isDrawMode: boolean;
-  setIsDrawMode: (value: boolean) => void;
+  mode: Mode;
+  setMode: (value: Mode) => void;
   currentColor: string;
   setCurrentColor: (value: string) => void;
   thickness: number;
@@ -24,8 +26,8 @@ interface ControlPanelProps {
 }
 
 export function ControlPanel({
-  isDrawMode,
-  setIsDrawMode,
+  mode,
+  setMode,
   currentColor,
   setCurrentColor,
   thickness,
@@ -36,16 +38,39 @@ export function ControlPanel({
 }: ControlPanelProps) {
   return (
     <div className="absolute top-5 left-5 flex flex-col gap-3">
-      <button
-        onClick={() => setIsDrawMode(!isDrawMode)}
-        className={`px-5 py-3 rounded-lg font-medium transition-all ${
-          isDrawMode
-            ? "bg-blue-500 text-white shadow-lg shadow-blue-500/30"
-            : "bg-gray-600 text-white hover:bg-gray-500"
-        }`}
-      >
-        {isDrawMode ? "✏️ 描画モード" : "🔄 カメラモード"}
-      </button>
+      {/* モード切り替え */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setMode("draw")}
+          className={`px-4 py-2 rounded-lg font-medium transition-all ${
+            mode === "draw"
+              ? "bg-blue-500 text-white shadow-lg shadow-blue-500/30"
+              : "bg-gray-600 text-white hover:bg-gray-500"
+          }`}
+        >
+          ✏️ 描画
+        </button>
+        <button
+          onClick={() => setMode("select")}
+          className={`px-4 py-2 rounded-lg font-medium transition-all ${
+            mode === "select"
+              ? "bg-green-500 text-white shadow-lg shadow-green-500/30"
+              : "bg-gray-600 text-white hover:bg-gray-500"
+          }`}
+        >
+          👆 選択
+        </button>
+        <button
+          onClick={() => setMode("camera")}
+          className={`px-4 py-2 rounded-lg font-medium transition-all ${
+            mode === "camera"
+              ? "bg-purple-500 text-white shadow-lg shadow-purple-500/30"
+              : "bg-gray-600 text-white hover:bg-gray-500"
+          }`}
+        >
+          🔄 カメラ
+        </button>
+      </div>
 
       <button
         onClick={onClear}

@@ -7,8 +7,10 @@ import { ControlPanel } from "./control_panel";
 import { HelpPanel } from "./help_panel";
 import type { Stroke } from "../types";
 
+type Mode = "draw" | "select" | "camera";
+
 export function ThreeCanvas() {
-  const [isDrawMode, setIsDrawMode] = useState(true);
+  const [mode, setMode] = useState<Mode>("draw");
   const [currentColor, setCurrentColor] = useState("#ff6b6b");
   const [thickness, setThickness] = useState(0.1);
   const [drawDistance, setDrawDistance] = useState(10);
@@ -19,24 +21,28 @@ export function ThreeCanvas() {
   const currentStrokeRef = useRef<Stroke | null>(null);
   const drawModeTypeRef = useRef<"floor" | "air" | null>(null);
   const fixedDrawDistanceRef = useRef<number | null>(null);
+  const [selectedStroke, setSelectedStroke] = useState<Stroke | null>(null);
 
   // 最新の値をrefで保持
-  const isDrawModeRef = useRef(isDrawMode);
+  const modeRef = useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+
   const currentColorRef = useRef(currentColor);
   const thicknessRef = useRef(thickness);
   const drawDistanceRef = useRef(drawDistance);
+  const selectedStrokeRef = useRef<Stroke | null>(null);
 
-  useEffect(() => { isDrawModeRef.current = isDrawMode; }, [isDrawMode]);
   useEffect(() => { currentColorRef.current = currentColor; }, [currentColor]);
   useEffect(() => { thicknessRef.current = thickness; }, [thickness]);
   useEffect(() => { drawDistanceRef.current = drawDistance; }, [drawDistance]);
+  useEffect(() => { selectedStrokeRef.current = selectedStroke; }, [selectedStroke]);
 
-  // 描画モード切り替え時のコントロール制御
+  // モード切り替え時のコントロール制御
   useEffect(() => {
     if (controlsRef.current) {
-      controlsRef.current.enabled = !isDrawMode;
+      controlsRef.current.enabled = mode === "camera";
     }
-  }, [isDrawMode, controlsRef]);
+  }, [mode, controlsRef]);
 
   // raycastTargetsをrefで保持
   const raycastTargetsRef = useRef<THREE.Mesh[]>([]);
@@ -46,7 +52,7 @@ export function ThreeCanvas() {
   useEffect(() => {
     if (!canvas || !scene || !camera) return;
 
-    // 床へのレイキャスト結果を取得
+    // 床へのレイキャスト結果を取得（描画距離より手前のみ）
     const getFloorIntersection = (clientX: number, clientY: number): THREE.Vector3 | null => {
       const rect = canvas.getBoundingClientRect();
       const mouse = new THREE.Vector2(
@@ -61,7 +67,14 @@ export function ThreeCanvas() {
       const floorIntersects = raycaster.intersectObjects(floorTargets, false);
 
       if (floorIntersects.length > 0) {
-        return floorIntersects[0].point.clone();
+        const hitPoint = floorIntersects[0].point;
+        const distanceToHit = camera.position.distanceTo(hitPoint);
+
+        // 描画距離より手前の場合のみ床として判定
+        const currentDistance = fixedDrawDistanceRef.current ?? drawDistanceRef.current;
+        if (distanceToHit < currentDistance) {
+          return hitPoint.clone();
+        }
       }
       return null;
     };
@@ -108,7 +121,7 @@ export function ThreeCanvas() {
 
     // スクロールで描画距離を調整
     const handleWheel = (e: WheelEvent) => {
-      if (!isDrawModeRef.current) return;
+      if (modeRef.current !== "draw") return;
       if (isDrawingRef.current) return; // 描画中は変更不可
       e.preventDefault();
 
@@ -146,24 +159,174 @@ export function ThreeCanvas() {
       scene.add(mesh);
     };
 
+    // 始点・終点マーカーを作成
+    const createMarkers = (stroke: Stroke) => {
+      if (stroke.points.length < 2) return;
+
+      // 既存のマーカーを削除
+      removeMarkers(stroke);
+
+      const markerGeometry = new THREE.SphereGeometry(stroke.thickness * 2, 16, 16);
+
+      // 始点マーカー（緑）
+      const startMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
+      const startMarker = new THREE.Mesh(markerGeometry, startMaterial);
+      startMarker.position.copy(stroke.points[0]);
+      startMarker.userData.strokeId = stroke.id;
+      startMarker.userData.markerType = "start";
+      scene.add(startMarker);
+      stroke.startMarker = startMarker;
+
+      // 終点マーカー（赤）
+      const endMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+      const endMarker = new THREE.Mesh(markerGeometry.clone(), endMaterial);
+      endMarker.position.copy(stroke.points[stroke.points.length - 1]);
+      endMarker.userData.strokeId = stroke.id;
+      endMarker.userData.markerType = "end";
+      scene.add(endMarker);
+      stroke.endMarker = endMarker;
+    };
+
+    // マーカーを削除
+    const removeMarkers = (stroke: Stroke) => {
+      if (stroke.startMarker) {
+        scene.remove(stroke.startMarker);
+        stroke.startMarker.geometry.dispose();
+        (stroke.startMarker.material as THREE.Material).dispose();
+        stroke.startMarker = undefined;
+      }
+      if (stroke.endMarker) {
+        scene.remove(stroke.endMarker);
+        stroke.endMarker.geometry.dispose();
+        (stroke.endMarker.material as THREE.Material).dispose();
+        stroke.endMarker = undefined;
+      }
+    };
+
+    // マーカーへのレイキャストをチェック
+    const checkMarkerHit = (clientX: number, clientY: number): { stroke: Stroke; type: "start" | "end" } | null => {
+      const rect = canvas.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+      );
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+
+      // 選択中のストロークのマーカーのみ
+      const markers: THREE.Mesh[] = [];
+      const selected = selectedStrokeRef.current;
+      if (selected) {
+        if (selected.startMarker) markers.push(selected.startMarker);
+        if (selected.endMarker) markers.push(selected.endMarker);
+      }
+
+      const intersects = raycaster.intersectObjects(markers, false);
+      if (intersects.length > 0) {
+        const hit = intersects[0].object as THREE.Mesh;
+        const strokeId = hit.userData.strokeId;
+        const markerType = hit.userData.markerType as "start" | "end";
+        const stroke = strokesRef.current.find(s => s.id === strokeId);
+        if (stroke) {
+          return { stroke, type: markerType };
+        }
+      }
+      return null;
+    };
+
+    // ストロークのメッシュへのレイキャストをチェック
+    const checkStrokeHit = (clientX: number, clientY: number): Stroke | null => {
+      const rect = canvas.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+      );
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+
+      const meshes: THREE.Mesh[] = [];
+      strokesRef.current.forEach(s => {
+        if (s.mesh) meshes.push(s.mesh);
+      });
+
+      const intersects = raycaster.intersectObjects(meshes, false);
+      if (intersects.length > 0) {
+        const hitMesh = intersects[0].object as THREE.Mesh;
+        return strokesRef.current.find(s => s.mesh === hitMesh) ?? null;
+      }
+      return null;
+    };
+
     const handlePointerDown = (e: PointerEvent) => {
-      if (!isDrawModeRef.current) return;
       if (e.button !== 0) return;
 
-      e.preventDefault();
-      canvas.setPointerCapture(e.pointerId);
+      // 選択モード
+      if (modeRef.current === "select") {
+        e.preventDefault();
 
-      const worldPos = getWorldPosition(e.clientX, e.clientY);
-      if (!worldPos) return;
+        // マーカーをクリックした場合は描画モードへ
+        const markerHit = checkMarkerHit(e.clientX, e.clientY);
+        if (markerHit) {
+          // 選択中のストロークの続きから描画開始
+          canvas.setPointerCapture(e.pointerId);
+          isDrawingRef.current = true;
+          currentStrokeRef.current = markerHit.stroke;
 
-      isDrawingRef.current = true;
-      currentStrokeRef.current = {
-        id: Math.random().toString(36).substring(2, 9),
-        points: [worldPos.clone()],
-        color: currentColorRef.current,
-        thickness: thicknessRef.current,
-        isSolidified: false,
-      };
+          // マーカーを削除
+          removeMarkers(markerHit.stroke);
+
+          // 始点からの場合はポイントを逆順にする
+          if (markerHit.type === "start") {
+            markerHit.stroke.points.reverse();
+          }
+
+          setSelectedStroke(null);
+          setMode("draw");
+          return;
+        }
+
+        // ストロークをクリックした場合
+        const strokeHit = checkStrokeHit(e.clientX, e.clientY);
+        if (strokeHit) {
+          // 既に選択中のストロークがあればマーカーを削除
+          const prevSelected = selectedStrokeRef.current;
+          if (prevSelected && prevSelected !== strokeHit) {
+            removeMarkers(prevSelected);
+          }
+
+          // 新しいストロークを選択してマーカー表示
+          setSelectedStroke(strokeHit);
+          createMarkers(strokeHit);
+        } else {
+          // 何もない場所をクリックしたら選択解除
+          const prevSelected = selectedStrokeRef.current;
+          if (prevSelected) {
+            removeMarkers(prevSelected);
+          }
+          setSelectedStroke(null);
+        }
+        return;
+      }
+
+      // 描画モード
+      if (modeRef.current === "draw") {
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+
+        const worldPos = getWorldPosition(e.clientX, e.clientY);
+        if (!worldPos) return;
+
+        isDrawingRef.current = true;
+        currentStrokeRef.current = {
+          id: Math.random().toString(36).substring(2, 9),
+          points: [worldPos.clone()],
+          color: currentColorRef.current,
+          thickness: thicknessRef.current,
+          isSolidified: false,
+        };
+      }
     };
 
     const handlePointerMove = (e: PointerEvent) => {
@@ -186,7 +349,11 @@ export function ThreeCanvas() {
 
       if (currentStrokeRef.current.points.length >= 2) {
         currentStrokeRef.current.isSolidified = true;
-        strokesRef.current.push(currentStrokeRef.current);
+
+        // 新規ストロークの場合のみ配列に追加
+        if (!strokesRef.current.includes(currentStrokeRef.current)) {
+          strokesRef.current.push(currentStrokeRef.current);
+        }
       } else if (currentStrokeRef.current.mesh) {
         scene.remove(currentStrokeRef.current.mesh);
         currentStrokeRef.current.mesh.geometry.dispose();
@@ -225,8 +392,19 @@ export function ThreeCanvas() {
         stroke.mesh.geometry.dispose();
         (stroke.mesh.material as THREE.Material).dispose();
       }
+      if (stroke.startMarker) {
+        scene.remove(stroke.startMarker);
+        stroke.startMarker.geometry.dispose();
+        (stroke.startMarker.material as THREE.Material).dispose();
+      }
+      if (stroke.endMarker) {
+        scene.remove(stroke.endMarker);
+        stroke.endMarker.geometry.dispose();
+        (stroke.endMarker.material as THREE.Material).dispose();
+      }
     });
     strokesRef.current = [];
+    setSelectedStroke(null);
   };
 
   return (
@@ -234,12 +412,12 @@ export function ThreeCanvas() {
       <div
         ref={containerRef}
         className="w-full h-full"
-        style={{ cursor: isDrawMode ? "crosshair" : "grab" }}
+        style={{ cursor: mode === "draw" ? "crosshair" : mode === "select" ? "pointer" : "grab" }}
       />
 
       <ControlPanel
-        isDrawMode={isDrawMode}
-        setIsDrawMode={setIsDrawMode}
+        mode={mode}
+        setMode={setMode}
         currentColor={currentColor}
         setCurrentColor={setCurrentColor}
         thickness={thickness}
