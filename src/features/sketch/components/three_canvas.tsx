@@ -19,7 +19,7 @@ export function ThreeCanvas() {
 
   const strokesRef = useRef<Stroke[]>([]);
   const currentStrokeRef = useRef<Stroke | null>(null);
-  const drawModeTypeRef = useRef<"floor" | "air" | null>(null);
+  const drawModeTypeRef = useRef<"floor" | "air" | "forceFloor" | null>(null);
   const fixedDrawDistanceRef = useRef<number | null>(null);
   const [selectedStroke, setSelectedStroke] = useState<Stroke | null>(null);
 
@@ -94,8 +94,38 @@ export function ThreeCanvas() {
       return camera.position.clone().add(direction.multiplyScalar(distance));
     };
 
+    // 床平面（y=-5）への投影位置を取得
+    const getFloorProjection = (clientX: number, clientY: number): THREE.Vector3 | null => {
+      const rect = canvas.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+      );
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+
+      // y=-5 の平面との交点を計算
+      const floorY = -5;
+      const direction = raycaster.ray.direction;
+      const origin = raycaster.ray.origin;
+
+      // 平面との交点: origin + t * direction で y = floorY となる t を求める
+      if (Math.abs(direction.y) < 0.0001) return null; // ほぼ水平なら交点なし
+      const t = (floorY - origin.y) / direction.y;
+      if (t < 0) return null; // カメラの後ろは無視
+
+      return new THREE.Vector3(
+        origin.x + t * direction.x,
+        floorY,
+        origin.z + t * direction.z
+      );
+    };
+
     // 描画モードに応じて位置を取得
-    const getWorldPosition = (clientX: number, clientY: number): THREE.Vector3 | null => {
+    // shiftKey: 強制的に空中モード
+    // altKey: 強制的に床モード（常に y=-5 に張り付く）
+    const getWorldPosition = (clientX: number, clientY: number, shiftKey = false, altKey = false): THREE.Vector3 | null => {
       // 描画中はそのモードを維持
       if (drawModeTypeRef.current === "floor") {
         const floorPos = getFloorIntersection(clientX, clientY);
@@ -103,9 +133,26 @@ export function ThreeCanvas() {
         return getAirPosition(clientX, clientY, fixedDrawDistanceRef.current ?? drawDistanceRef.current);
       } else if (drawModeTypeRef.current === "air" && fixedDrawDistanceRef.current !== null) {
         return getAirPosition(clientX, clientY, fixedDrawDistanceRef.current);
+      } else if (drawModeTypeRef.current === "forceFloor") {
+        // 強制床モード: 常に y=-5 に張り付く
+        return getFloorProjection(clientX, clientY);
       }
 
-      // 描画開始時: 床にヒットするかチェック
+      // 描画開始時: モディファイアキーで強制指定
+      if (shiftKey) {
+        // Shift: 強制的に空中モード
+        drawModeTypeRef.current = "air";
+        fixedDrawDistanceRef.current = drawDistanceRef.current;
+        return getAirPosition(clientX, clientY, fixedDrawDistanceRef.current);
+      }
+
+      if (altKey) {
+        // Alt(Option): 強制床モード（常に y=-5 に張り付く）
+        drawModeTypeRef.current = "forceFloor";
+        return getFloorProjection(clientX, clientY);
+      }
+
+      // 通常: 床にヒットするかチェック
       const floorPos = getFloorIntersection(clientX, clientY);
       if (floorPos) {
         drawModeTypeRef.current = "floor";
@@ -129,19 +176,33 @@ export function ThreeCanvas() {
       setDrawDistance(prev => Math.max(2, Math.min(60, prev + delta)));
     };
 
+    // オブジェクトを安全に破棄（useEffect内用）
+    const disposeObject = (obj: THREE.Object3D) => {
+      scene.remove(obj);
+      obj.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (child.geometry) child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach(m => m.dispose());
+          } else if (child.material) {
+            child.material.dispose();
+          }
+        }
+      });
+    };
+
     const updateStrokeMesh = (stroke: Stroke) => {
       if (stroke.points.length < 2) return;
 
       if (stroke.mesh) {
-        scene.remove(stroke.mesh);
-        stroke.mesh.geometry.dispose();
-        (stroke.mesh.material as THREE.Material).dispose();
+        disposeObject(stroke.mesh);
       }
 
       const curve = new THREE.CatmullRomCurve3(stroke.points);
+      const tubeSegments = Math.max(stroke.points.length * 2, 20);
       const tubeGeometry = new THREE.TubeGeometry(
         curve,
-        Math.max(stroke.points.length * 2, 20),
+        tubeSegments,
         stroke.thickness,
         8,
         false
@@ -154,9 +215,48 @@ export function ThreeCanvas() {
         side: THREE.DoubleSide,
       });
 
-      const mesh = new THREE.Mesh(tubeGeometry, material);
-      stroke.mesh = mesh;
-      scene.add(mesh);
+      // カーブの実際の端点と接線を取得
+      const startPoint = curve.getPointAt(0);
+      const endPoint = curve.getPointAt(1);
+      const startTangent = curve.getTangentAt(0);
+      const endTangent = curve.getTangentAt(1);
+
+      // 端点にキャップ（半球）を追加
+      const capGeometry = new THREE.SphereGeometry(
+        stroke.thickness,
+        8,
+        8,
+        0,
+        Math.PI * 2,
+        0,
+        Math.PI / 2 // 半球
+      );
+
+      // 始点キャップ（接線の逆方向を向く）
+      const startCap = new THREE.Mesh(capGeometry, material.clone());
+      startCap.position.copy(startPoint);
+      startCap.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        startTangent.clone().negate()
+      );
+
+      // 終点キャップ（接線方向を向く）
+      const endCap = new THREE.Mesh(capGeometry.clone(), material.clone());
+      endCap.position.copy(endPoint);
+      endCap.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        endTangent
+      );
+
+      // チューブとキャップをグループ化
+      const group = new THREE.Group();
+      const tubeMesh = new THREE.Mesh(tubeGeometry, material);
+      group.add(tubeMesh);
+      group.add(startCap);
+      group.add(endCap);
+
+      stroke.mesh = group as unknown as THREE.Mesh;
+      scene.add(group);
     };
 
     // 始点・終点マーカーを作成
@@ -164,14 +264,28 @@ export function ThreeCanvas() {
       if (stroke.points.length < 2) return;
 
       // 既存のマーカーを削除
-      removeMarkers(stroke);
+      removeMarkers(stroke, false);
 
-      const markerGeometry = new THREE.SphereGeometry(stroke.thickness * 2, 16, 16);
+      const markerRadius = stroke.thickness * 2;
+      const markerGeometry = new THREE.SphereGeometry(markerRadius, 16, 16);
+
+      // 始点の方向ベクトル（始点から2番目の点への逆方向）
+      const startDir = new THREE.Vector3()
+        .subVectors(stroke.points[0], stroke.points[1])
+        .normalize();
+      const startPos = stroke.points[0].clone().add(startDir.multiplyScalar(markerRadius));
+
+      // 終点の方向ベクトル（終点から1つ前の点への逆方向）
+      const endIdx = stroke.points.length - 1;
+      const endDir = new THREE.Vector3()
+        .subVectors(stroke.points[endIdx], stroke.points[endIdx - 1])
+        .normalize();
+      const endPos = stroke.points[endIdx].clone().add(endDir.multiplyScalar(markerRadius));
 
       // 始点マーカー（緑）
       const startMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
       const startMarker = new THREE.Mesh(markerGeometry, startMaterial);
-      startMarker.position.copy(stroke.points[0]);
+      startMarker.position.copy(startPos);
       startMarker.userData.strokeId = stroke.id;
       startMarker.userData.markerType = "start";
       scene.add(startMarker);
@@ -180,7 +294,7 @@ export function ThreeCanvas() {
       // 終点マーカー（赤）
       const endMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000 });
       const endMarker = new THREE.Mesh(markerGeometry.clone(), endMaterial);
-      endMarker.position.copy(stroke.points[stroke.points.length - 1]);
+      endMarker.position.copy(endPos);
       endMarker.userData.strokeId = stroke.id;
       endMarker.userData.markerType = "end";
       scene.add(endMarker);
@@ -188,18 +302,18 @@ export function ThreeCanvas() {
     };
 
     // マーカーを削除
-    const removeMarkers = (stroke: Stroke) => {
+    const removeMarkers = (stroke: Stroke, rebuildMesh = true) => {
       if (stroke.startMarker) {
-        scene.remove(stroke.startMarker);
-        stroke.startMarker.geometry.dispose();
-        (stroke.startMarker.material as THREE.Material).dispose();
+        disposeObject(stroke.startMarker);
         stroke.startMarker = undefined;
       }
       if (stroke.endMarker) {
-        scene.remove(stroke.endMarker);
-        stroke.endMarker.geometry.dispose();
-        (stroke.endMarker.material as THREE.Material).dispose();
+        disposeObject(stroke.endMarker);
         stroke.endMarker = undefined;
+      }
+      // マーカー削除後にメッシュを再構築して隙間を防ぐ
+      if (rebuildMesh && stroke.isSolidified) {
+        updateStrokeMesh(stroke);
       }
     };
 
@@ -246,15 +360,24 @@ export function ThreeCanvas() {
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(mouse, camera);
 
-      const meshes: THREE.Mesh[] = [];
+      const objects: THREE.Object3D[] = [];
       strokesRef.current.forEach(s => {
-        if (s.mesh) meshes.push(s.mesh);
+        if (s.mesh) objects.push(s.mesh);
       });
 
-      const intersects = raycaster.intersectObjects(meshes, false);
+      // recursive=true でグループの子要素も検索
+      const intersects = raycaster.intersectObjects(objects, true);
       if (intersects.length > 0) {
-        const hitMesh = intersects[0].object as THREE.Mesh;
-        return strokesRef.current.find(s => s.mesh === hitMesh) ?? null;
+        const hitObject = intersects[0].object;
+        // 親グループを辿ってストロークを特定
+        return strokesRef.current.find(s => {
+          if (!s.mesh) return false;
+          if (s.mesh === hitObject) return true;
+          if (s.mesh instanceof THREE.Group) {
+            return s.mesh.children.includes(hitObject);
+          }
+          return false;
+        }) ?? null;
       }
       return null;
     };
@@ -274,8 +397,8 @@ export function ThreeCanvas() {
           isDrawingRef.current = true;
           currentStrokeRef.current = markerHit.stroke;
 
-          // マーカーを削除
-          removeMarkers(markerHit.stroke);
+          // マーカーを削除（続きを描くので再構築は不要）
+          removeMarkers(markerHit.stroke, false);
 
           // 始点からの場合はポイントを逆順にする
           if (markerHit.type === "start") {
@@ -315,7 +438,7 @@ export function ThreeCanvas() {
         e.preventDefault();
         canvas.setPointerCapture(e.pointerId);
 
-        const worldPos = getWorldPosition(e.clientX, e.clientY);
+        const worldPos = getWorldPosition(e.clientX, e.clientY, e.shiftKey, e.altKey);
         if (!worldPos) return;
 
         isDrawingRef.current = true;
@@ -332,6 +455,7 @@ export function ThreeCanvas() {
     const handlePointerMove = (e: PointerEvent) => {
       if (!isDrawingRef.current || !currentStrokeRef.current) return;
 
+      // 描画中はモディファイアキー不要（開始時に決定済み）
       const worldPos = getWorldPosition(e.clientX, e.clientY);
       if (!worldPos) return;
 
@@ -355,9 +479,7 @@ export function ThreeCanvas() {
           strokesRef.current.push(currentStrokeRef.current);
         }
       } else if (currentStrokeRef.current.mesh) {
-        scene.remove(currentStrokeRef.current.mesh);
-        currentStrokeRef.current.mesh.geometry.dispose();
-        (currentStrokeRef.current.mesh.material as THREE.Material).dispose();
+        disposeObject(currentStrokeRef.current.mesh);
       }
 
       isDrawingRef.current = false;
@@ -383,24 +505,35 @@ export function ThreeCanvas() {
     };
   }, [canvas, scene, camera, isDrawingRef]);
 
+  // メッシュまたはグループを安全に破棄
+  const disposeMesh = (obj: THREE.Object3D) => {
+    if (!scene) return;
+    scene.remove(obj);
+
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        if (child.geometry) child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => m.dispose());
+        } else if (child.material) {
+          child.material.dispose();
+        }
+      }
+    });
+  };
+
   const clearAll = () => {
     if (!scene) return;
 
     strokesRef.current.forEach((stroke) => {
       if (stroke.mesh) {
-        scene.remove(stroke.mesh);
-        stroke.mesh.geometry.dispose();
-        (stroke.mesh.material as THREE.Material).dispose();
+        disposeMesh(stroke.mesh);
       }
       if (stroke.startMarker) {
-        scene.remove(stroke.startMarker);
-        stroke.startMarker.geometry.dispose();
-        (stroke.startMarker.material as THREE.Material).dispose();
+        disposeMesh(stroke.startMarker);
       }
       if (stroke.endMarker) {
-        scene.remove(stroke.endMarker);
-        stroke.endMarker.geometry.dispose();
-        (stroke.endMarker.material as THREE.Material).dispose();
+        disposeMesh(stroke.endMarker);
       }
     });
     strokesRef.current = [];

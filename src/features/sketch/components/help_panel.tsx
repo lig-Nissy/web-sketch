@@ -7,6 +7,8 @@ export function HelpPanel() {
       <ul className="space-y-1">
         <li>✏️ 描画モード:</li>
         <li className="pl-4">- ドラッグ: 床や空中に描画</li>
+        <li className="pl-4">- Shift+ドラッグ: 強制的に空中</li>
+        <li className="pl-4">- Option+ドラッグ: 床に張り付く</li>
         <li className="pl-4">- ホイール: 描画距離調整</li>
         <li>👆 選択モード:</li>
         <li className="pl-4">- クリック: オブジェクト選択</li>
