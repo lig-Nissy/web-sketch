@@ -18,9 +18,8 @@ interface ControlPanelProps {
   setCurrentColor: (value: string) => void;
   thickness: number;
   setThickness: (value: number) => void;
-  depth: number;
-  setDepth: (value: number) => void;
-  onSolidify: () => void;
+  drawDistance: number;
+  setDrawDistance: (value: number) => void;
   onClear: () => void;
 }
 
@@ -31,9 +30,8 @@ export function ControlPanel({
   setCurrentColor,
   thickness,
   setThickness,
-  depth,
-  setDepth,
-  onSolidify,
+  drawDistance,
+  setDrawDistance,
   onClear,
 }: ControlPanelProps) {
   return (
@@ -50,13 +48,6 @@ export function ControlPanel({
       </button>
 
       <button
-        onClick={onSolidify}
-        className="px-5 py-3 rounded-lg font-medium bg-purple-500 text-white hover:bg-purple-600 transition-all"
-      >
-        🎨 実体化
-      </button>
-
-      <button
         onClick={onClear}
         className="px-5 py-3 rounded-lg font-medium bg-red-500 text-white hover:bg-red-600 transition-all"
       >
@@ -64,19 +55,31 @@ export function ControlPanel({
       </button>
 
       {/* カラーパレット */}
-      <div className="flex flex-wrap gap-2 max-w-[180px] bg-black/50 p-3 rounded-lg">
-        {COLORS.map((color) => (
-          <button
-            key={color}
-            onClick={() => setCurrentColor(color)}
-            className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
-              currentColor === color
-                ? "ring-2 ring-white ring-offset-2 ring-offset-black"
-                : ""
-            }`}
-            style={{ backgroundColor: color }}
+      <div className="bg-black/50 p-3 rounded-lg">
+        <div className="flex flex-wrap gap-2 max-w-[180px]">
+          {COLORS.map((color) => (
+            <button
+              key={color}
+              onClick={() => setCurrentColor(color)}
+              className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
+                currentColor === color
+                  ? "ring-2 ring-white ring-offset-2 ring-offset-black"
+                  : ""
+              }`}
+              style={{ backgroundColor: color }}
+            />
+          ))}
+        </div>
+        {/* カスタムカラーピッカー */}
+        <div className="flex items-center gap-2 mt-3">
+          <input
+            type="color"
+            value={currentColor}
+            onChange={(e) => setCurrentColor(e.target.value)}
+            className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent"
           />
-        ))}
+          <span className="text-white text-xs">{currentColor}</span>
+        </div>
       </div>
 
       {/* 太さスライダー */}
@@ -84,27 +87,28 @@ export function ControlPanel({
         <label className="block mb-2">線の太さ: {thickness.toFixed(2)}</label>
         <input
           type="range"
-          min="0.02"
-          max="0.3"
-          step="0.02"
+          min="0.05"
+          max="0.5"
+          step="0.05"
           value={thickness}
           onChange={(e) => setThickness(parseFloat(e.target.value))}
           className="w-full"
         />
       </div>
 
-      {/* 深度スライダー */}
+      {/* 描画距離スライダー */}
       <div className="bg-black/50 p-3 rounded-lg text-white text-sm">
-        <label className="block mb-2">描画深度: {depth.toFixed(1)}</label>
+        <label className="block mb-2">描画距離: {drawDistance.toFixed(0)}</label>
         <input
           type="range"
-          min="-5"
-          max="5"
-          step="0.5"
-          value={depth}
-          onChange={(e) => setDepth(parseFloat(e.target.value))}
+          min="2"
+          max="60"
+          step="1"
+          value={drawDistance}
+          onChange={(e) => setDrawDistance(parseFloat(e.target.value))}
           className="w-full"
         />
+        <p className="text-xs text-gray-400 mt-2">スクロールでも調整可能</p>
       </div>
     </div>
   );
