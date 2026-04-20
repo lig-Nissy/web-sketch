@@ -153,28 +153,42 @@ export function useThreeScene(): UseThreeSceneReturn {
         const right = new THREE.Vector3();
         right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
 
+        const BOUNDARY = 48; // 床の端より少し内側
+
+        // 移動先の位置を計算して範囲内かチェック
+        const tryMove = (delta: THREE.Vector3) => {
+          const newX = newCamera.position.x + delta.x;
+          const newZ = newCamera.position.z + delta.z;
+
+          // 範囲内なら移動
+          if (newX >= -BOUNDARY && newX <= BOUNDARY && newZ >= -BOUNDARY && newZ <= BOUNDARY) {
+            newCamera.position.add(delta);
+            controls.target.add(delta);
+          } else {
+            // 壁に沿ってスライド（片方の軸だけ移動可能な場合）
+            if (newX >= -BOUNDARY && newX <= BOUNDARY) {
+              newCamera.position.x = newX;
+              controls.target.x += delta.x;
+            }
+            if (newZ >= -BOUNDARY && newZ <= BOUNDARY) {
+              newCamera.position.z = newZ;
+              controls.target.z += delta.z;
+            }
+          }
+        };
+
         if (keys.w) {
-          newCamera.position.addScaledVector(direction, moveSpeed);
-          controls.target.addScaledVector(direction, moveSpeed);
+          tryMove(direction.clone().multiplyScalar(moveSpeed));
         }
         if (keys.s) {
-          newCamera.position.addScaledVector(direction, -moveSpeed);
-          controls.target.addScaledVector(direction, -moveSpeed);
+          tryMove(direction.clone().multiplyScalar(-moveSpeed));
         }
         if (keys.a) {
-          newCamera.position.addScaledVector(right, -moveSpeed);
-          controls.target.addScaledVector(right, -moveSpeed);
+          tryMove(right.clone().multiplyScalar(-moveSpeed));
         }
         if (keys.d) {
-          newCamera.position.addScaledVector(right, moveSpeed);
-          controls.target.addScaledVector(right, moveSpeed);
+          tryMove(right.clone().multiplyScalar(moveSpeed));
         }
-
-        // 床の範囲内に制限
-        newCamera.position.x = Math.max(-50, Math.min(50, newCamera.position.x));
-        newCamera.position.z = Math.max(-50, Math.min(50, newCamera.position.z));
-        controls.target.x = Math.max(-50, Math.min(50, controls.target.x));
-        controls.target.z = Math.max(-50, Math.min(50, controls.target.z));
       }
 
       setCameraPosition(newCamera.position.clone());

@@ -100,6 +100,23 @@ export function ThreeCanvas() {
   useEffect(() => {
     if (!canvas || !scene || !camera) return;
 
+    const BOUNDARY = 48; // 描画可能な境界
+
+    // 位置が境界内かチェック
+    const isWithinBoundary = (pos: THREE.Vector3): boolean => {
+      return pos.x >= -BOUNDARY && pos.x <= BOUNDARY &&
+             pos.z >= -BOUNDARY && pos.z <= BOUNDARY;
+    };
+
+    // 位置を境界内に制限
+    const clampToBoundary = (pos: THREE.Vector3): THREE.Vector3 => {
+      return new THREE.Vector3(
+        Math.max(-BOUNDARY, Math.min(BOUNDARY, pos.x)),
+        pos.y,
+        Math.max(-BOUNDARY, Math.min(BOUNDARY, pos.z))
+      );
+    };
+
     // 床へのレイキャスト結果を取得（描画距離より手前のみ）
     const getFloorIntersection = (clientX: number, clientY: number): THREE.Vector3 | null => {
       const rect = canvas.getBoundingClientRect();
@@ -121,7 +138,8 @@ export function ThreeCanvas() {
         // 描画距離より手前の場合のみ床として判定
         const currentDistance = fixedDrawDistanceRef.current ?? drawDistanceRef.current;
         if (distanceToHit < currentDistance) {
-          return hitPoint.clone();
+          // 境界内に制限
+          return clampToBoundary(hitPoint.clone());
         }
       }
       return null;
@@ -139,7 +157,9 @@ export function ThreeCanvas() {
       raycaster.setFromCamera(mouse, camera);
 
       const direction = raycaster.ray.direction.clone().normalize();
-      return camera.position.clone().add(direction.multiplyScalar(distance));
+      const pos = camera.position.clone().add(direction.multiplyScalar(distance));
+      // 境界内に制限
+      return clampToBoundary(pos);
     };
 
     // 床平面（y=-5）への投影位置を取得
@@ -163,11 +183,13 @@ export function ThreeCanvas() {
       const t = (floorY - origin.y) / direction.y;
       if (t < 0) return null; // カメラの後ろは無視
 
-      return new THREE.Vector3(
+      const pos = new THREE.Vector3(
         origin.x + t * direction.x,
         floorY,
         origin.z + t * direction.z
       );
+      // 境界内に制限
+      return clampToBoundary(pos);
     };
 
     // 描画モードに応じて位置を取得
