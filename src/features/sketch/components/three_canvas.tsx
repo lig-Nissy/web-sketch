@@ -65,9 +65,20 @@ export function ThreeCanvas() {
   useEffect(() => {
     if (!collisionCheckRef) return;
 
-    const COLLISION_RADIUS = 0.5; // プレイヤーの当たり判定半径
+    const COLLISION_RADIUS = 0.5; // プレイヤーの当たり判定半径（水平方向）
+    const FLOOR_Y = -5; // 床の高さ
+    // カメラ位置(pos.y)は足元として扱う（groundY=0が床の上）
+    // 床(y=-5)の上に立つと、カメラはy=0になる
+    // つまりカメラ位置と床の差が5
 
-    const checkCollision = (pos: THREE.Vector3): boolean => {
+    const checkCollision = (pos: THREE.Vector3): { collides: boolean; groundY?: number } => {
+      let groundY: number | undefined = undefined;
+
+      // カメラ位置を実際のワールド座標に変換
+      // pos.y=0 の時、実際の足元は y=-5（床の上）
+      const actualFeetY = pos.y + FLOOR_Y; // 実際の足元Y座標
+      const actualHeadY = actualFeetY + 2.0; // 実際の頭Y座標（身長2m）
+
       // ストロークとの衝突判定（通常ペン・デコペン両方）
       for (const stroke of strokesRef.current) {
         if (!stroke.isSolidified || stroke.points.length < 2) continue;
@@ -98,7 +109,7 @@ export function ThreeCanvas() {
             ? stroke.thickness * 3
             : stroke.thickness;
           if (distance < effectiveThickness + COLLISION_RADIUS) {
-            return true;
+            return { collides: true };
           }
         }
       }
@@ -109,25 +120,59 @@ export function ThreeCanvas() {
 
         if (obj.boundingBox) {
           // ボックス判定
-          const dx = Math.abs(pos.x - objPos.x);
-          const dy = Math.abs(pos.y - objPos.y);
-          const dz = Math.abs(pos.z - objPos.z);
           const halfW = obj.boundingBox.width / 2;
           const halfH = obj.boundingBox.height / 2;
           const halfD = obj.boundingBox.depth / 2;
-          if (dx < halfW + COLLISION_RADIUS && dy < halfH + COLLISION_RADIUS && dz < halfD + COLLISION_RADIUS) {
-            return true;
+
+          const boxTop = objPos.y + halfH;
+          const boxBottom = objPos.y - halfH;
+
+          const dx = Math.abs(pos.x - objPos.x);
+          const dz = Math.abs(pos.z - objPos.z);
+
+          // 水平方向でボックスの範囲内か
+          const inBoxHorizontal = dx < halfW + COLLISION_RADIUS && dz < halfD + COLLISION_RADIUS;
+
+          if (inBoxHorizontal) {
+            // プレイヤーの足元がボックスの上面より上 → 乗れる地面
+            if (actualFeetY >= boxTop - 0.1) {
+              // boxTopをカメラ座標系に変換（boxTop - FLOOR_Y）
+              const newGroundY = boxTop - FLOOR_Y;
+              if (groundY === undefined || newGroundY > groundY) {
+                groundY = newGroundY;
+              }
+            }
+            // プレイヤーの体がボックスと重なっている → 衝突
+            // 足元が上面より下、かつ頭が下面より上
+            else if (actualFeetY < boxTop && actualHeadY > boxBottom) {
+              return { collides: true };
+            }
           }
         } else if (obj.boundingRadius) {
-          // 球判定
-          const distance = pos.distanceTo(objPos);
-          if (distance < obj.boundingRadius + COLLISION_RADIUS) {
-            return true;
+          // 球判定 - 水平距離で判定
+          const horizontalDist = Math.sqrt(
+            Math.pow(pos.x - objPos.x, 2) + Math.pow(pos.z - objPos.z, 2)
+          );
+          const sphereTop = objPos.y + obj.boundingRadius;
+          const sphereBottom = objPos.y - obj.boundingRadius;
+
+          if (horizontalDist < obj.boundingRadius + COLLISION_RADIUS) {
+            // プレイヤーの足元が球の上面より上 → 乗れる
+            if (actualFeetY >= sphereTop - 0.1) {
+              const newGroundY = sphereTop - FLOOR_Y;
+              if (groundY === undefined || newGroundY > groundY) {
+                groundY = newGroundY;
+              }
+            }
+            // プレイヤーの体が球と重なっている → 衝突
+            else if (actualFeetY < sphereTop && actualHeadY > sphereBottom) {
+              return { collides: true };
+            }
           }
         }
       }
 
-      return false;
+      return { collides: false, groundY };
     };
 
     collisionCheckRef.current = checkCollision;
@@ -596,7 +641,7 @@ export function ThreeCanvas() {
 
     // 立方体を作成
     const createCube = (position: THREE.Vector3): PlacedObject => {
-      const size = 1;
+      const size = 3;
       const geometry = new THREE.BoxGeometry(size, size, size);
       const material = new THREE.MeshPhongMaterial({
         color: currentColorRef.current,
@@ -620,7 +665,7 @@ export function ThreeCanvas() {
 
     // 直方体を作成
     const createBox = (position: THREE.Vector3): PlacedObject => {
-      const width = 2, height = 1, depth = 0.5;
+      const width = 5, height = 2, depth = 3;
       const geometry = new THREE.BoxGeometry(width, height, depth);
       const material = new THREE.MeshPhongMaterial({
         color: currentColorRef.current,
@@ -644,7 +689,7 @@ export function ThreeCanvas() {
 
     // 球を作成
     const createSphere = (position: THREE.Vector3): PlacedObject => {
-      const radius = 0.5;
+      const radius = 1.5;
       const geometry = new THREE.SphereGeometry(radius, 32, 32);
       const material = new THREE.MeshPhongMaterial({
         color: currentColorRef.current,

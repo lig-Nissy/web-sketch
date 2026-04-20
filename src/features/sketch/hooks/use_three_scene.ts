@@ -4,6 +4,11 @@ import { useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
+export interface CollisionResult {
+  collides: boolean;
+  groundY?: number; // プレイヤーが立てる地面の高さ
+}
+
 interface UseThreeSceneReturn {
   containerRef: (node: HTMLDivElement | null) => void;
   canvas: HTMLCanvasElement | null;
@@ -14,7 +19,7 @@ interface UseThreeSceneReturn {
   raycastTargets: THREE.Mesh[];
   isDrawingRef: React.RefObject<boolean>;
   onAnimateRef: React.RefObject<(() => void) | null>;
-  collisionCheckRef: React.RefObject<((pos: THREE.Vector3) => boolean) | null>;
+  collisionCheckRef: React.RefObject<((pos: THREE.Vector3) => CollisionResult) | null>;
 }
 
 // 球面レイヤー（視覚的なガイド用）
@@ -31,7 +36,7 @@ export function useThreeScene(): UseThreeSceneReturn {
   const initializedRef = useRef(false);
   const isDrawingRef = useRef(false);
   const onAnimateRef = useRef<(() => void) | null>(null);
-  const collisionCheckRef = useRef<((pos: THREE.Vector3) => boolean) | null>(null);
+  const collisionCheckRef = useRef<((pos: THREE.Vector3) => CollisionResult) | null>(null);
 
   const containerRef = useCallback((container: HTMLDivElement | null) => {
     if (!container || initializedRef.current) return;
@@ -171,6 +176,13 @@ export function useThreeScene(): UseThreeSceneReturn {
 
         const BOUNDARY = 48; // 床の端より少し内側
 
+        // 現在立っている地面の高さを取得
+        let currentGroundY = groundY;
+        const groundCheck = collisionRef.current ? collisionRef.current(newCamera.position) : null;
+        if (groundCheck?.groundY !== undefined) {
+          currentGroundY = groundCheck.groundY;
+        }
+
         // 移動先の位置を計算して範囲内かチェック
         const tryMove = (delta: THREE.Vector3) => {
           const newPos = newCamera.position.clone().add(delta);
@@ -181,10 +193,10 @@ export function useThreeScene(): UseThreeSceneReturn {
           const withinBoundary = newX >= -BOUNDARY && newX <= BOUNDARY && newZ >= -BOUNDARY && newZ <= BOUNDARY;
 
           // ストロークとの衝突チェック
-          const hasCollision = collisionRef.current ? collisionRef.current(newPos) : false;
+          const collision = collisionRef.current ? collisionRef.current(newPos) : { collides: false };
 
           // 範囲内かつ衝突なしなら移動
-          if (withinBoundary && !hasCollision) {
+          if (withinBoundary && !collision.collides) {
             newCamera.position.add(delta);
             controls.target.add(delta);
           } else if (!withinBoundary) {
@@ -195,8 +207,8 @@ export function useThreeScene(): UseThreeSceneReturn {
             if (slideX) {
               const testPos = newCamera.position.clone();
               testPos.x = newX;
-              const slideCollision = collisionRef.current ? collisionRef.current(testPos) : false;
-              if (!slideCollision) {
+              const slideCollision = collisionRef.current ? collisionRef.current(testPos) : { collides: false };
+              if (!slideCollision.collides) {
                 newCamera.position.x = newX;
                 controls.target.x += delta.x;
               }
@@ -204,8 +216,8 @@ export function useThreeScene(): UseThreeSceneReturn {
             if (slideZ) {
               const testPos = newCamera.position.clone();
               testPos.z = newZ;
-              const slideCollision = collisionRef.current ? collisionRef.current(testPos) : false;
-              if (!slideCollision) {
+              const slideCollision = collisionRef.current ? collisionRef.current(testPos) : { collides: false };
+              if (!slideCollision.collides) {
                 newCamera.position.z = newZ;
                 controls.target.z += delta.z;
               }
@@ -226,6 +238,9 @@ export function useThreeScene(): UseThreeSceneReturn {
           tryMove(right.clone().multiplyScalar(moveSpeed));
         }
 
+        // 現在の地面の高さを更新
+        let standingOnGround = currentGroundY;
+
         // ジャンプ処理
         if (isJumping) {
           const newY = newCamera.position.y + jumpVelocity;
@@ -233,23 +248,56 @@ export function useThreeScene(): UseThreeSceneReturn {
           testPos.y = newY;
 
           // ジャンプ中も衝突判定
-          const jumpCollision = collisionRef.current ? collisionRef.current(testPos) : false;
-          if (!jumpCollision) {
+          const jumpCollision = collisionRef.current ? collisionRef.current(testPos) : { collides: false };
+
+          if (!jumpCollision.collides) {
+            const deltaY = newY - newCamera.position.y;
             newCamera.position.y = newY;
-            controls.target.y += jumpVelocity;
+            controls.target.y += deltaY;
+
+            // 落下中にオブジェクトの上面を見つけたら着地
+            if (jumpVelocity < 0 && jumpCollision.groundY !== undefined && newY <= jumpCollision.groundY) {
+              const landY = jumpCollision.groundY;
+              const landDelta = landY - newCamera.position.y;
+              newCamera.position.y = landY;
+              controls.target.y += landDelta;
+              isJumping = false;
+              jumpVelocity = 0;
+              standingOnGround = landY;
+            }
           } else {
-            // 衝突したら速度をリセット（上昇中に天井にぶつかった場合）
+            // 衝突したら速度をリセット
             if (jumpVelocity > 0) {
+              // 上昇中に天井にぶつかった
+              jumpVelocity = 0;
+            } else if (jumpVelocity < 0) {
+              // 下降中に衝突 → 着地
+              isJumping = false;
               jumpVelocity = 0;
             }
           }
           jumpVelocity -= gravity;
 
-          // 着地判定
+          // 床への着地判定
           if (newCamera.position.y <= groundY) {
+            const landDelta = groundY - newCamera.position.y;
             newCamera.position.y = groundY;
-            controls.target.y = groundY;
+            controls.target.y += landDelta;
             isJumping = false;
+            jumpVelocity = 0;
+          }
+        } else {
+          // 地面の上にいる時、現在の足元をチェック
+          const belowCheck = collisionRef.current ? collisionRef.current(newCamera.position) : null;
+
+          if (belowCheck?.groundY !== undefined) {
+            standingOnGround = belowCheck.groundY;
+          }
+
+          // ブロックから降りた場合（足元に何もない）
+          if (standingOnGround < newCamera.position.y - 0.5 && standingOnGround <= groundY) {
+            // 落下開始
+            isJumping = true;
             jumpVelocity = 0;
           }
         }
