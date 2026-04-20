@@ -13,6 +13,7 @@ export function HelpPanel() {
         <li>👆 選択モード:</li>
         <li className="pl-4">- クリック: オブジェクト選択</li>
         <li className="pl-4">- 🟢緑/🔴赤マーカー: 続きから描画</li>
+        <li className="pl-4">- Delete/⌫: 選択を削除</li>
         <li>🔄 カメラモード:</li>
         <li className="pl-4">- ドラッグ: 回転</li>
         <li className="pl-4">- ホイール: ズーム</li>

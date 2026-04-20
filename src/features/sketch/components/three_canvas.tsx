@@ -754,6 +754,42 @@ export function ThreeCanvas() {
     setSelectedStroke(null);
   };
 
+  // 選択中のストロークを削除
+  const deleteSelectedStroke = () => {
+    if (!scene || !selectedStroke) return;
+
+    // メッシュとパーティクルを削除
+    if (selectedStroke.mesh) {
+      disposeMesh(selectedStroke.mesh);
+    }
+    if (selectedStroke.particles) {
+      disposeMesh(selectedStroke.particles);
+    }
+    if (selectedStroke.startMarker) {
+      disposeMesh(selectedStroke.startMarker);
+    }
+    if (selectedStroke.endMarker) {
+      disposeMesh(selectedStroke.endMarker);
+    }
+
+    // 配列から削除
+    strokesRef.current = strokesRef.current.filter(s => s.id !== selectedStroke.id);
+    setSelectedStroke(null);
+  };
+
+  // Delete/Backspaceキーで選択中のストロークを削除
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedStroke && mode === "select") {
+        e.preventDefault();
+        deleteSelectedStroke();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedStroke, mode, scene]);
+
   return (
     <div className="relative w-full h-screen">
       <div
