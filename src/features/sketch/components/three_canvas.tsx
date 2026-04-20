@@ -16,6 +16,7 @@ export function ThreeCanvas() {
   const [drawDistance, setDrawDistance] = useState(10);
   const [penType, setPenType] = useState<PenType>("normal");
   const [stampType, setStampType] = useState<StampType>("shooting_star");
+  const [stampGravity, setStampGravity] = useState(false);
 
   const { containerRef, canvas, scene, camera, controlsRef, raycastTargets, isDrawingRef, onAnimateRef, collisionCheckRef } = useThreeScene();
 
@@ -28,6 +29,9 @@ export function ThreeCanvas() {
 
   const stampTypeRef = useRef(stampType);
   useEffect(() => { stampTypeRef.current = stampType; }, [stampType]);
+
+  const stampGravityRef = useRef(stampGravity);
+  useEffect(() => { stampGravityRef.current = stampGravity; }, [stampGravity]);
 
   // 最新の値をrefで保持
   const modeRef = useRef(mode);
@@ -57,13 +61,14 @@ export function ThreeCanvas() {
   const raycastTargetsRef = useRef<THREE.Mesh[]>([]);
   useEffect(() => { raycastTargetsRef.current = raycastTargets; }, [raycastTargets]);
 
-  // ストロークとの衝突判定
+  // ストローク・スタンプとの衝突判定
   useEffect(() => {
     if (!collisionCheckRef) return;
 
     const COLLISION_RADIUS = 0.5; // プレイヤーの当たり判定半径
 
     const checkCollision = (pos: THREE.Vector3): boolean => {
+      // ストロークとの衝突判定（通常ペン・デコペン両方）
       for (const stroke of strokesRef.current) {
         if (!stroke.isSolidified || stroke.points.length < 2) continue;
 
@@ -88,11 +93,43 @@ export function ThreeCanvas() {
           const distance = pos.distanceTo(closestPoint);
 
           // 衝突判定（ストロークの太さ + プレイヤー半径）
-          if (distance < stroke.thickness + COLLISION_RADIUS) {
+          // デコペン（炎・星）は太さを大きめに設定
+          const effectiveThickness = (stroke.penType === "fire" || stroke.penType === "star")
+            ? stroke.thickness * 3
+            : stroke.thickness;
+          if (distance < effectiveThickness + COLLISION_RADIUS) {
             return true;
           }
         }
       }
+
+      // スタンプとの衝突判定
+      for (const stamp of stampsRef.current) {
+        const stampPos = stamp.position;
+
+        if (stamp.type === "cow") {
+          // 牛: ボックス判定（約1.2 x 1.2）
+          const dx = Math.abs(pos.x - stampPos.x);
+          const dz = Math.abs(pos.z - stampPos.z);
+          const dy = Math.abs(pos.y - stampPos.y);
+          if (dx < 1.0 + COLLISION_RADIUS && dz < 0.6 + COLLISION_RADIUS && dy < 1.5) {
+            return true;
+          }
+        } else if (stamp.type === "shooting_star") {
+          // 流れ星: 中心からの距離判定
+          const distance = pos.distanceTo(stampPos);
+          if (distance < 1.5 + COLLISION_RADIUS) {
+            return true;
+          }
+        } else if (stamp.type === "steak") {
+          // ステーキ: 小さめの円形判定
+          const distance = pos.distanceTo(stampPos);
+          if (distance < 0.6 + COLLISION_RADIUS) {
+            return true;
+          }
+        }
+      }
+
       return false;
     };
 
@@ -103,9 +140,121 @@ export function ThreeCanvas() {
     };
   }, [collisionCheckRef]);
 
+  // 牛をステーキに変換（隠し機能）
+  const transformCowToSteak = (cow: Stamp, scene: THREE.Scene) => {
+    // 牛のグループを削除
+    if (cow.group) {
+      scene.remove(cow.group);
+      cow.group.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (child.geometry) child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach(m => m.dispose());
+          } else if (child.material) {
+            child.material.dispose();
+          }
+        }
+      });
+    }
+
+    // ステーキのグループを作成
+    const group = new THREE.Group();
+
+    // ステーキ本体（平らな楕円形の肉）
+    const steakGeometry = new THREE.BoxGeometry(0.8, 0.12, 0.5);
+    const steakMaterial = new THREE.MeshPhongMaterial({
+      color: 0x8b4513,
+      shininess: 30,
+    });
+    const steak = new THREE.Mesh(steakGeometry, steakMaterial);
+    steak.position.y = 0.06;
+    group.add(steak);
+
+    // 焼き目（縞模様）- 上面に配置
+    const grillMarkGeometry = new THREE.BoxGeometry(0.7, 0.02, 0.06);
+    const grillMarkMaterial = new THREE.MeshPhongMaterial({ color: 0x3d2817 });
+    for (let i = -2; i <= 2; i++) {
+      const mark = new THREE.Mesh(grillMarkGeometry, grillMarkMaterial);
+      mark.position.set(0, 0.13, i * 0.1);
+      mark.rotation.y = Math.PI / 6;
+      group.add(mark);
+    }
+
+    // 湯気パーティクル
+    const steamCount = 20;
+    const steamPositions = new Float32Array(steamCount * 3);
+    const steamSizes = new Float32Array(steamCount);
+    for (let i = 0; i < steamCount; i++) {
+      steamPositions[i * 3] = (Math.random() - 0.5) * 0.6;
+      steamPositions[i * 3 + 1] = 0.2 + Math.random() * 0.5;
+      steamPositions[i * 3 + 2] = (Math.random() - 0.5) * 0.4;
+      steamSizes[i] = 0.1 + Math.random() * 0.1;
+    }
+    const steamGeometry = new THREE.BufferGeometry();
+    steamGeometry.setAttribute("position", new THREE.BufferAttribute(steamPositions, 3));
+    steamGeometry.setAttribute("size", new THREE.BufferAttribute(steamSizes, 1));
+    const steamMaterial = new THREE.PointsMaterial({
+      size: 0.15,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+    });
+    const steam = new THREE.Points(steamGeometry, steamMaterial);
+    group.add(steam);
+
+    group.position.copy(cow.position);
+    scene.add(group);
+
+    // スタンプデータを更新
+    cow.type = "steak";
+    cow.group = group;
+    cow.animationData = {
+      ...cow.animationData,
+      baseY: cow.position.y,
+      steamInitialY: steamPositions.slice(),
+    };
+  };
+
+  // 牛と炎ストロークの衝突判定
+  const checkCowFireCollision = (cow: Stamp): boolean => {
+    const cowPos = cow.position;
+    const cowRadius = 1.0; // 牛の当たり判定半径
+
+    for (const stroke of strokesRef.current) {
+      if (stroke.penType !== "fire" || !stroke.isSolidified || stroke.points.length < 2) continue;
+
+      // 炎ストロークの各セグメントとの距離をチェック
+      for (let i = 0; i < stroke.points.length - 1; i++) {
+        const p1 = stroke.points[i];
+        const p2 = stroke.points[i + 1];
+
+        const line = new THREE.Vector3().subVectors(p2, p1);
+        const lineLength = line.length();
+        if (lineLength === 0) continue;
+
+        const lineDir = line.normalize();
+        const toPos = new THREE.Vector3().subVectors(cowPos, p1);
+
+        let t = toPos.dot(lineDir);
+        t = Math.max(0, Math.min(lineLength, t));
+
+        const closestPoint = p1.clone().add(lineDir.multiplyScalar(t));
+        const distance = cowPos.distanceTo(closestPoint);
+
+        // 炎の当たり判定（太さ×3）
+        const fireRadius = stroke.thickness * 3;
+        if (distance < fireRadius + cowRadius) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   // パーティクルアニメーション
   useEffect(() => {
-    if (!onAnimateRef) return;
+    if (!onAnimateRef || !scene) return;
 
     const animateParticles = () => {
       const time = Date.now() * 0.001;
@@ -141,7 +290,40 @@ export function ThreeCanvas() {
       });
 
       // スタンプのアニメーション
+      const GRAVITY = 0.01;
+      const FLOOR_Y = -5;
+
       stampsRef.current.forEach((stamp) => {
+        // 重力処理
+        if (stamp.hasGravity && !stamp.isGrounded) {
+          stamp.velocity.y -= GRAVITY;
+          stamp.position.y += stamp.velocity.y;
+
+          // 床との衝突判定
+          const groundLevel = FLOOR_Y + (stamp.type === "cow" ? 0 : 0);
+          if (stamp.position.y <= groundLevel) {
+            stamp.position.y = groundLevel;
+            stamp.velocity.y = 0;
+            stamp.isGrounded = true;
+          }
+
+          // 位置を更新
+          if (stamp.group) {
+            stamp.group.position.y = stamp.position.y;
+            stamp.animationData = { ...stamp.animationData, baseY: stamp.position.y };
+          }
+          if (stamp.particles) {
+            // パーティクルの初期位置も更新
+            const initialPositions = stamp.animationData?.initialPositions as Float32Array;
+            if (initialPositions) {
+              const deltaY = stamp.position.y - (stamp.animationData?.startY as number || stamp.position.y);
+              for (let i = 0; i < initialPositions.length / 3; i++) {
+                initialPositions[i * 3 + 1] += stamp.velocity.y;
+              }
+            }
+          }
+        }
+
         if (stamp.type === "shooting_star" && stamp.particles) {
           // 流れ星: パーティクルを斜め下に流す
           const positions = stamp.particles.geometry.attributes.position;
@@ -157,9 +339,35 @@ export function ThreeCanvas() {
             positions.needsUpdate = true;
           }
         } else if (stamp.type === "cow" && stamp.group) {
-          // 牛: ゆらゆら揺れる
+          // 牛: ゆらゆら揺れる（重力中は揺れない）
           stamp.group.rotation.y = Math.sin(time * 2) * 0.1;
-          stamp.group.position.y = (stamp.animationData?.baseY as number || 0) + Math.sin(time * 3) * 0.1;
+          if (!stamp.hasGravity || stamp.isGrounded) {
+            stamp.group.position.y = (stamp.animationData?.baseY as number || 0) + Math.sin(time * 3) * 0.1;
+          }
+
+          // 🔥 隠し機能: 炎に触れたらステーキに変身！
+          if (checkCowFireCollision(stamp)) {
+            transformCowToSteak(stamp, scene);
+          }
+        } else if (stamp.type === "steak" && stamp.group) {
+          // ステーキ: 湯気を上昇させる
+          const steam = stamp.group.children.find(c => c instanceof THREE.Points) as THREE.Points | undefined;
+          if (steam) {
+            const positions = steam.geometry.attributes.position;
+            const initialY = stamp.animationData?.steamInitialY as Float32Array;
+            if (initialY) {
+              for (let i = 0; i < positions.count; i++) {
+                const baseY = initialY[i * 3 + 1];
+                const offset = ((time * 0.5 + i * 0.2) % 1) * 0.8;
+                positions.setY(i, baseY + offset);
+                // 透明度の代わりにサイズを変更
+                const sizes = steam.geometry.attributes.size;
+                sizes.setX(i, 0.1 * (1 - offset));
+              }
+              positions.needsUpdate = true;
+              steam.geometry.attributes.size.needsUpdate = true;
+            }
+          }
         }
       });
     };
@@ -169,7 +377,7 @@ export function ThreeCanvas() {
     return () => {
       onAnimateRef.current = null;
     };
-  }, [onAnimateRef]);
+  }, [onAnimateRef, scene]);
 
   // Canvas にイベントを直接アタッチ
   useEffect(() => {
@@ -374,6 +582,9 @@ export function ThreeCanvas() {
         animationData: {
           initialPositions: positions.slice(), // 初期位置を保存
         },
+        hasGravity: stampGravityRef.current,
+        velocity: new THREE.Vector3(0, 0, 0),
+        isGrounded: false,
       };
     };
 
@@ -473,6 +684,9 @@ export function ThreeCanvas() {
         animationData: {
           baseY: position.y,
         },
+        hasGravity: stampGravityRef.current,
+        velocity: new THREE.Vector3(0, 0, 0),
+        isGrounded: false,
       };
     };
 
@@ -1096,6 +1310,8 @@ export function ThreeCanvas() {
         setPenType={setPenType}
         stampType={stampType}
         setStampType={setStampType}
+        stampGravity={stampGravity}
+        setStampGravity={setStampGravity}
         onClear={clearAll}
       />
 

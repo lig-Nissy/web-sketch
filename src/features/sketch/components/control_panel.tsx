@@ -40,6 +40,8 @@ interface ControlPanelProps {
   setPenType: (value: PenType) => void;
   stampType: StampType;
   setStampType: (value: StampType) => void;
+  stampGravity: boolean;
+  setStampGravity: (value: boolean) => void;
   onClear: () => void;
 }
 
@@ -56,6 +58,8 @@ export function ControlPanel({
   setPenType,
   stampType,
   setStampType,
+  stampGravity,
+  setStampGravity,
   onClear,
 }: ControlPanelProps) {
   return (
@@ -154,6 +158,16 @@ export function ControlPanel({
               </button>
             ))}
           </div>
+          {/* 重力トグル */}
+          <label className="flex items-center gap-2 mt-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={stampGravity}
+              onChange={(e) => setStampGravity(e.target.checked)}
+              className="w-4 h-4 rounded"
+            />
+            <span className="text-white text-sm">🌍 重力</span>
+          </label>
         </div>
       )}
 

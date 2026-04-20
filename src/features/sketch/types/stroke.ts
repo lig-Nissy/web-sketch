@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 export type PenType = "normal" | "fire" | "star" | "mirror";
-export type StampType = "shooting_star" | "cow";
+export type StampType = "shooting_star" | "cow" | "steak";
 
 export interface Stamp {
   id: string;
@@ -10,6 +10,10 @@ export interface Stamp {
   group?: THREE.Group;
   particles?: THREE.Points;
   animationData?: Record<string, unknown>;
+  // 重力関連
+  hasGravity: boolean;
+  velocity: THREE.Vector3;
+  isGrounded: boolean;
 }
 
 export interface Stroke {
