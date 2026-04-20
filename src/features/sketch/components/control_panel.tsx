@@ -1,8 +1,8 @@
 "use client";
 
-import type { PenType, StampType } from "../types";
+import type { PenType, ObjectType } from "../types";
 
-type Mode = "draw" | "select" | "camera" | "stamp";
+type Mode = "draw" | "select" | "camera" | "object";
 
 const PEN_TYPES: { type: PenType; label: string; icon: string }[] = [
   { type: "normal", label: "通常", icon: "✏️" },
@@ -11,7 +11,10 @@ const PEN_TYPES: { type: PenType; label: string; icon: string }[] = [
   { type: "mirror", label: "鏡", icon: "🪞" },
 ];
 
-const STAMP_TYPES: { type: StampType; label: string; icon: string }[] = [
+const OBJECT_TYPES: { type: ObjectType; label: string; icon: string }[] = [
+  { type: "cube", label: "立方体", icon: "🟧" },
+  { type: "box", label: "直方体", icon: "📦" },
+  { type: "sphere", label: "球", icon: "🔵" },
   { type: "shooting_star", label: "流れ星", icon: "🌠" },
   { type: "cow", label: "牛", icon: "🐄" },
 ];
@@ -38,10 +41,10 @@ interface ControlPanelProps {
   setDrawDistance: (value: number) => void;
   penType: PenType;
   setPenType: (value: PenType) => void;
-  stampType: StampType;
-  setStampType: (value: StampType) => void;
-  stampGravity: boolean;
-  setStampGravity: (value: boolean) => void;
+  objectType: ObjectType;
+  setObjectType: (value: ObjectType) => void;
+  objectGravity: boolean;
+  setObjectGravity: (value: boolean) => void;
   onClear: () => void;
 }
 
@@ -56,10 +59,10 @@ export function ControlPanel({
   setDrawDistance,
   penType,
   setPenType,
-  stampType,
-  setStampType,
-  stampGravity,
-  setStampGravity,
+  objectType,
+  setObjectType,
+  objectGravity,
+  setObjectGravity,
   onClear,
 }: ControlPanelProps) {
   return (
@@ -97,14 +100,14 @@ export function ControlPanel({
           🔄 カメラ
         </button>
         <button
-          onClick={() => setMode("stamp")}
+          onClick={() => setMode("object")}
           className={`px-4 py-2 rounded-lg font-medium transition-all ${
-            mode === "stamp"
+            mode === "object"
               ? "bg-orange-500 text-white shadow-lg shadow-orange-500/30"
               : "bg-gray-600 text-white hover:bg-gray-500"
           }`}
         >
-          🎨 スタンプ
+          📦 オブジェクト
         </button>
       </div>
 
@@ -138,23 +141,23 @@ export function ControlPanel({
         </div>
       )}
 
-      {/* スタンプ種類（スタンプモード時のみ表示） */}
-      {mode === "stamp" && (
+      {/* オブジェクト種類（オブジェクトモード時のみ表示） */}
+      {mode === "object" && (
         <div className="bg-black/50 p-3 rounded-lg">
-          <p className="text-white text-sm mb-2">スタンプ種類</p>
-          <div className="flex gap-2">
-            {STAMP_TYPES.map((stamp) => (
+          <p className="text-white text-sm mb-2">オブジェクト種類</p>
+          <div className="flex flex-wrap gap-2 max-w-[200px]">
+            {OBJECT_TYPES.map((obj) => (
               <button
-                key={stamp.type}
-                onClick={() => setStampType(stamp.type)}
+                key={obj.type}
+                onClick={() => setObjectType(obj.type)}
                 className={`px-3 py-2 rounded-lg text-sm transition-all ${
-                  stampType === stamp.type
+                  objectType === obj.type
                     ? "bg-orange-500 text-white shadow-lg"
                     : "bg-gray-700 text-white hover:bg-gray-600"
                 }`}
-                title={stamp.label}
+                title={obj.label}
               >
-                {stamp.icon}
+                {obj.icon}
               </button>
             ))}
           </div>
@@ -162,8 +165,8 @@ export function ControlPanel({
           <label className="flex items-center gap-2 mt-3 cursor-pointer">
             <input
               type="checkbox"
-              checked={stampGravity}
-              onChange={(e) => setStampGravity(e.target.checked)}
+              checked={objectGravity}
+              onChange={(e) => setObjectGravity(e.target.checked)}
               className="w-4 h-4 rounded"
             />
             <span className="text-white text-sm">🌍 重力</span>

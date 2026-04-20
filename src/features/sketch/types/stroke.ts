@@ -1,20 +1,28 @@
 import * as THREE from "three";
 
 export type PenType = "normal" | "fire" | "star" | "mirror";
-export type StampType = "shooting_star" | "cow" | "steak";
+export type ObjectType = "shooting_star" | "cow" | "steak" | "cube" | "box" | "sphere";
 
-export interface Stamp {
+export interface PlacedObject {
   id: string;
-  type: StampType;
+  type: ObjectType;
   position: THREE.Vector3;
   group?: THREE.Group;
+  mesh?: THREE.Mesh;
   particles?: THREE.Points;
   animationData?: Record<string, unknown>;
   // 重力関連
   hasGravity: boolean;
   velocity: THREE.Vector3;
   isGrounded: boolean;
+  // 当たり判定用サイズ
+  boundingBox?: { width: number; height: number; depth: number };
+  boundingRadius?: number;
 }
+
+// 後方互換性のためのエイリアス
+export type StampType = ObjectType;
+export type Stamp = PlacedObject;
 
 export interface Stroke {
   id: string;

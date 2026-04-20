@@ -5,9 +5,9 @@ import * as THREE from "three";
 import { useThreeScene } from "../hooks/use_three_scene";
 import { ControlPanel } from "./control_panel";
 import { HelpPanel } from "./help_panel";
-import type { Stroke, PenType, StampType, Stamp } from "../types";
+import type { Stroke, PenType, ObjectType, PlacedObject } from "../types";
 
-type Mode = "draw" | "select" | "camera" | "stamp";
+type Mode = "draw" | "select" | "camera" | "object";
 
 export function ThreeCanvas() {
   const [mode, setMode] = useState<Mode>("draw");
@@ -15,23 +15,23 @@ export function ThreeCanvas() {
   const [thickness, setThickness] = useState(0.1);
   const [drawDistance, setDrawDistance] = useState(10);
   const [penType, setPenType] = useState<PenType>("normal");
-  const [stampType, setStampType] = useState<StampType>("shooting_star");
-  const [stampGravity, setStampGravity] = useState(false);
+  const [objectType, setObjectType] = useState<ObjectType>("cube");
+  const [objectGravity, setObjectGravity] = useState(false);
 
   const { containerRef, canvas, scene, camera, controlsRef, raycastTargets, isDrawingRef, onAnimateRef, collisionCheckRef } = useThreeScene();
 
   const strokesRef = useRef<Stroke[]>([]);
-  const stampsRef = useRef<Stamp[]>([]);
+  const objectsRef = useRef<PlacedObject[]>([]);
   const currentStrokeRef = useRef<Stroke | null>(null);
   const drawModeTypeRef = useRef<"floor" | "air" | "forceFloor" | null>(null);
   const fixedDrawDistanceRef = useRef<number | null>(null);
   const [selectedStroke, setSelectedStroke] = useState<Stroke | null>(null);
 
-  const stampTypeRef = useRef(stampType);
-  useEffect(() => { stampTypeRef.current = stampType; }, [stampType]);
+  const objectTypeRef = useRef(objectType);
+  useEffect(() => { objectTypeRef.current = objectType; }, [objectType]);
 
-  const stampGravityRef = useRef(stampGravity);
-  useEffect(() => { stampGravityRef.current = stampGravity; }, [stampGravity]);
+  const objectGravityRef = useRef(objectGravity);
+  useEffect(() => { objectGravityRef.current = objectGravity; }, [objectGravity]);
 
   // 最新の値をrefで保持
   const modeRef = useRef(mode);
@@ -61,7 +61,7 @@ export function ThreeCanvas() {
   const raycastTargetsRef = useRef<THREE.Mesh[]>([]);
   useEffect(() => { raycastTargetsRef.current = raycastTargets; }, [raycastTargets]);
 
-  // ストローク・スタンプとの衝突判定
+  // ストローク・オブジェクトとの衝突判定
   useEffect(() => {
     if (!collisionCheckRef) return;
 
@@ -103,28 +103,25 @@ export function ThreeCanvas() {
         }
       }
 
-      // スタンプとの衝突判定
-      for (const stamp of stampsRef.current) {
-        const stampPos = stamp.position;
+      // オブジェクトとの衝突判定
+      for (const obj of objectsRef.current) {
+        const objPos = obj.position;
 
-        if (stamp.type === "cow") {
-          // 牛: ボックス判定（約1.2 x 1.2）
-          const dx = Math.abs(pos.x - stampPos.x);
-          const dz = Math.abs(pos.z - stampPos.z);
-          const dy = Math.abs(pos.y - stampPos.y);
-          if (dx < 1.0 + COLLISION_RADIUS && dz < 0.6 + COLLISION_RADIUS && dy < 1.5) {
+        if (obj.boundingBox) {
+          // ボックス判定
+          const dx = Math.abs(pos.x - objPos.x);
+          const dy = Math.abs(pos.y - objPos.y);
+          const dz = Math.abs(pos.z - objPos.z);
+          const halfW = obj.boundingBox.width / 2;
+          const halfH = obj.boundingBox.height / 2;
+          const halfD = obj.boundingBox.depth / 2;
+          if (dx < halfW + COLLISION_RADIUS && dy < halfH + COLLISION_RADIUS && dz < halfD + COLLISION_RADIUS) {
             return true;
           }
-        } else if (stamp.type === "shooting_star") {
-          // 流れ星: 中心からの距離判定
-          const distance = pos.distanceTo(stampPos);
-          if (distance < 1.5 + COLLISION_RADIUS) {
-            return true;
-          }
-        } else if (stamp.type === "steak") {
-          // ステーキ: 小さめの円形判定
-          const distance = pos.distanceTo(stampPos);
-          if (distance < 0.6 + COLLISION_RADIUS) {
+        } else if (obj.boundingRadius) {
+          // 球判定
+          const distance = pos.distanceTo(objPos);
+          if (distance < obj.boundingRadius + COLLISION_RADIUS) {
             return true;
           }
         }
@@ -141,7 +138,7 @@ export function ThreeCanvas() {
   }, [collisionCheckRef]);
 
   // 牛をステーキに変換（隠し機能）
-  const transformCowToSteak = (cow: Stamp, scene: THREE.Scene) => {
+  const transformCowToSteak = (cow: PlacedObject, scene: THREE.Scene) => {
     // 牛のグループを削除
     if (cow.group) {
       scene.remove(cow.group);
@@ -206,9 +203,11 @@ export function ThreeCanvas() {
     group.position.copy(cow.position);
     scene.add(group);
 
-    // スタンプデータを更新
+    // オブジェクトデータを更新
     cow.type = "steak";
     cow.group = group;
+    cow.boundingBox = { width: 0.8, height: 0.2, depth: 0.5 };
+    cow.boundingRadius = undefined;
     cow.animationData = {
       ...cow.animationData,
       baseY: cow.position.y,
@@ -217,7 +216,7 @@ export function ThreeCanvas() {
   };
 
   // 牛と炎ストロークの衝突判定
-  const checkCowFireCollision = (cow: Stamp): boolean => {
+  const checkCowFireCollision = (cow: PlacedObject): boolean => {
     const cowPos = cow.position;
     const cowRadius = 1.0; // 牛の当たり判定半径
 
@@ -289,45 +288,111 @@ export function ThreeCanvas() {
         }
       });
 
-      // スタンプのアニメーション
+      // オブジェクトのアニメーション
       const GRAVITY = 0.01;
       const FLOOR_Y = -5;
 
-      stampsRef.current.forEach((stamp) => {
+      // オブジェクト同士の衝突判定関数
+      const checkObjectCollision = (obj1: PlacedObject, obj2: PlacedObject): THREE.Vector3 | null => {
+        if (obj1.id === obj2.id) return null;
+
+        const pos1 = obj1.position;
+        const pos2 = obj2.position;
+
+        // 両方が球の場合
+        if (obj1.boundingRadius && obj2.boundingRadius) {
+          const distance = pos1.distanceTo(pos2);
+          const minDist = obj1.boundingRadius + obj2.boundingRadius;
+          if (distance < minDist && distance > 0) {
+            const normal = new THREE.Vector3().subVectors(pos1, pos2).normalize();
+            return normal.multiplyScalar(minDist - distance);
+          }
+        }
+        // 両方がボックスの場合、または片方がボックスで片方が球の場合
+        else {
+          const box1 = obj1.boundingBox || { width: (obj1.boundingRadius || 0.5) * 2, height: (obj1.boundingRadius || 0.5) * 2, depth: (obj1.boundingRadius || 0.5) * 2 };
+          const box2 = obj2.boundingBox || { width: (obj2.boundingRadius || 0.5) * 2, height: (obj2.boundingRadius || 0.5) * 2, depth: (obj2.boundingRadius || 0.5) * 2 };
+
+          const dx = Math.abs(pos1.x - pos2.x);
+          const dy = Math.abs(pos1.y - pos2.y);
+          const dz = Math.abs(pos1.z - pos2.z);
+
+          const overlapX = (box1.width / 2 + box2.width / 2) - dx;
+          const overlapY = (box1.height / 2 + box2.height / 2) - dy;
+          const overlapZ = (box1.depth / 2 + box2.depth / 2) - dz;
+
+          if (overlapX > 0 && overlapY > 0 && overlapZ > 0) {
+            // 最小の重なり方向に押し出す
+            const pushDir = new THREE.Vector3();
+            if (overlapX <= overlapY && overlapX <= overlapZ) {
+              pushDir.x = pos1.x > pos2.x ? overlapX : -overlapX;
+            } else if (overlapY <= overlapX && overlapY <= overlapZ) {
+              pushDir.y = pos1.y > pos2.y ? overlapY : -overlapY;
+            } else {
+              pushDir.z = pos1.z > pos2.z ? overlapZ : -overlapZ;
+            }
+            return pushDir;
+          }
+        }
+        return null;
+      };
+
+      objectsRef.current.forEach((obj) => {
         // 重力処理
-        if (stamp.hasGravity && !stamp.isGrounded) {
-          stamp.velocity.y -= GRAVITY;
-          stamp.position.y += stamp.velocity.y;
+        if (obj.hasGravity && !obj.isGrounded) {
+          obj.velocity.y -= GRAVITY;
+          obj.position.y += obj.velocity.y;
 
           // 床との衝突判定
-          const groundLevel = FLOOR_Y + (stamp.type === "cow" ? 0 : 0);
-          if (stamp.position.y <= groundLevel) {
-            stamp.position.y = groundLevel;
-            stamp.velocity.y = 0;
-            stamp.isGrounded = true;
+          const objHeight = obj.boundingBox ? obj.boundingBox.height / 2 : (obj.boundingRadius || 0.5);
+          const groundLevel = FLOOR_Y + objHeight;
+          if (obj.position.y <= groundLevel) {
+            obj.position.y = groundLevel;
+            obj.velocity.y = 0;
+            obj.isGrounded = true;
           }
 
           // 位置を更新
-          if (stamp.group) {
-            stamp.group.position.y = stamp.position.y;
-            stamp.animationData = { ...stamp.animationData, baseY: stamp.position.y };
+          if (obj.group) {
+            obj.group.position.copy(obj.position);
+            obj.animationData = { ...obj.animationData, baseY: obj.position.y };
           }
-          if (stamp.particles) {
+          if (obj.mesh) {
+            obj.mesh.position.copy(obj.position);
+          }
+          if (obj.particles) {
             // パーティクルの初期位置も更新
-            const initialPositions = stamp.animationData?.initialPositions as Float32Array;
+            const initialPositions = obj.animationData?.initialPositions as Float32Array;
             if (initialPositions) {
-              const deltaY = stamp.position.y - (stamp.animationData?.startY as number || stamp.position.y);
               for (let i = 0; i < initialPositions.length / 3; i++) {
-                initialPositions[i * 3 + 1] += stamp.velocity.y;
+                initialPositions[i * 3 + 1] += obj.velocity.y;
               }
             }
           }
         }
 
-        if (stamp.type === "shooting_star" && stamp.particles) {
+        // オブジェクト同士の衝突判定（重力有効時のみ）
+        if (obj.hasGravity) {
+          for (const other of objectsRef.current) {
+            if (obj.id === other.id) continue;
+            const push = checkObjectCollision(obj, other);
+            if (push) {
+              // 上からの衝突は着地扱い
+              if (push.y > 0 && obj.velocity.y < 0) {
+                obj.velocity.y = 0;
+                obj.isGrounded = true;
+              }
+              obj.position.add(push.multiplyScalar(0.5));
+              if (obj.group) obj.group.position.copy(obj.position);
+              if (obj.mesh) obj.mesh.position.copy(obj.position);
+            }
+          }
+        }
+
+        if (obj.type === "shooting_star" && obj.particles) {
           // 流れ星: パーティクルを斜め下に流す
-          const positions = stamp.particles.geometry.attributes.position;
-          const initialPositions = stamp.animationData?.initialPositions as Float32Array;
+          const positions = obj.particles.geometry.attributes.position;
+          const initialPositions = obj.animationData?.initialPositions as Float32Array;
 
           if (initialPositions) {
             for (let i = 0; i < positions.count; i++) {
@@ -338,23 +403,23 @@ export function ThreeCanvas() {
             }
             positions.needsUpdate = true;
           }
-        } else if (stamp.type === "cow" && stamp.group) {
+        } else if (obj.type === "cow" && obj.group) {
           // 牛: ゆらゆら揺れる（重力中は揺れない）
-          stamp.group.rotation.y = Math.sin(time * 2) * 0.1;
-          if (!stamp.hasGravity || stamp.isGrounded) {
-            stamp.group.position.y = (stamp.animationData?.baseY as number || 0) + Math.sin(time * 3) * 0.1;
+          obj.group.rotation.y = Math.sin(time * 2) * 0.1;
+          if (!obj.hasGravity || obj.isGrounded) {
+            obj.group.position.y = (obj.animationData?.baseY as number || 0) + Math.sin(time * 3) * 0.1;
           }
 
           // 🔥 隠し機能: 炎に触れたらステーキに変身！
-          if (checkCowFireCollision(stamp)) {
-            transformCowToSteak(stamp, scene);
+          if (checkCowFireCollision(obj)) {
+            transformCowToSteak(obj, scene);
           }
-        } else if (stamp.type === "steak" && stamp.group) {
+        } else if (obj.type === "steak" && obj.group) {
           // ステーキ: 湯気を上昇させる
-          const steam = stamp.group.children.find(c => c instanceof THREE.Points) as THREE.Points | undefined;
+          const steam = obj.group.children.find(c => c instanceof THREE.Points) as THREE.Points | undefined;
           if (steam) {
             const positions = steam.geometry.attributes.position;
-            const initialY = stamp.animationData?.steamInitialY as Float32Array;
+            const initialY = obj.animationData?.steamInitialY as Float32Array;
             if (initialY) {
               for (let i = 0; i < positions.count; i++) {
                 const baseY = initialY[i * 3 + 1];
@@ -521,7 +586,7 @@ export function ThreeCanvas() {
 
     // スクロールで描画距離を調整
     const handleWheel = (e: WheelEvent) => {
-      if (modeRef.current !== "draw" && modeRef.current !== "stamp") return;
+      if (modeRef.current !== "draw" && modeRef.current !== "object") return;
       if (isDrawingRef.current) return; // 描画中は変更不可
       e.preventDefault();
 
@@ -529,8 +594,80 @@ export function ThreeCanvas() {
       setDrawDistance(prev => Math.max(2, Math.min(60, prev + delta)));
     };
 
-    // 流れ星スタンプを作成
-    const createShootingStarStamp = (position: THREE.Vector3): Stamp => {
+    // 立方体を作成
+    const createCube = (position: THREE.Vector3): PlacedObject => {
+      const size = 1;
+      const geometry = new THREE.BoxGeometry(size, size, size);
+      const material = new THREE.MeshPhongMaterial({
+        color: currentColorRef.current,
+        shininess: 100,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.copy(position);
+      scene.add(mesh);
+
+      return {
+        id: Math.random().toString(36).substring(2, 9),
+        type: "cube",
+        position: position.clone(),
+        mesh,
+        boundingBox: { width: size, height: size, depth: size },
+        hasGravity: objectGravityRef.current,
+        velocity: new THREE.Vector3(0, 0, 0),
+        isGrounded: false,
+      };
+    };
+
+    // 直方体を作成
+    const createBox = (position: THREE.Vector3): PlacedObject => {
+      const width = 2, height = 1, depth = 0.5;
+      const geometry = new THREE.BoxGeometry(width, height, depth);
+      const material = new THREE.MeshPhongMaterial({
+        color: currentColorRef.current,
+        shininess: 100,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.copy(position);
+      scene.add(mesh);
+
+      return {
+        id: Math.random().toString(36).substring(2, 9),
+        type: "box",
+        position: position.clone(),
+        mesh,
+        boundingBox: { width, height, depth },
+        hasGravity: objectGravityRef.current,
+        velocity: new THREE.Vector3(0, 0, 0),
+        isGrounded: false,
+      };
+    };
+
+    // 球を作成
+    const createSphere = (position: THREE.Vector3): PlacedObject => {
+      const radius = 0.5;
+      const geometry = new THREE.SphereGeometry(radius, 32, 32);
+      const material = new THREE.MeshPhongMaterial({
+        color: currentColorRef.current,
+        shininess: 100,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.copy(position);
+      scene.add(mesh);
+
+      return {
+        id: Math.random().toString(36).substring(2, 9),
+        type: "sphere",
+        position: position.clone(),
+        mesh,
+        boundingRadius: radius,
+        hasGravity: objectGravityRef.current,
+        velocity: new THREE.Vector3(0, 0, 0),
+        isGrounded: false,
+      };
+    };
+
+    // 流れ星を作成
+    const createShootingStar = (position: THREE.Vector3): PlacedObject => {
       const particleCount = 50;
       const positions = new Float32Array(particleCount * 3);
       const colors = new Float32Array(particleCount * 3);
@@ -582,14 +719,15 @@ export function ThreeCanvas() {
         animationData: {
           initialPositions: positions.slice(), // 初期位置を保存
         },
-        hasGravity: stampGravityRef.current,
+        boundingRadius: 1.5,
+        hasGravity: objectGravityRef.current,
         velocity: new THREE.Vector3(0, 0, 0),
         isGrounded: false,
       };
     };
 
-    // 牛スタンプを作成
-    const createCowStamp = (position: THREE.Vector3): Stamp => {
+    // 牛を作成
+    const createCow = (position: THREE.Vector3): PlacedObject => {
       const group = new THREE.Group();
 
       // 体
@@ -684,24 +822,39 @@ export function ThreeCanvas() {
         animationData: {
           baseY: position.y,
         },
-        hasGravity: stampGravityRef.current,
+        boundingBox: { width: 1.5, height: 1.2, depth: 0.8 },
+        hasGravity: objectGravityRef.current,
         velocity: new THREE.Vector3(0, 0, 0),
         isGrounded: false,
       };
     };
 
-    // スタンプを配置
-    const placeStamp = (clientX: number, clientY: number) => {
+    // オブジェクトを配置
+    const placeObject = (clientX: number, clientY: number) => {
       const worldPos = getWorldPosition(clientX, clientY);
       if (!worldPos) return;
 
-      let stamp: Stamp;
-      if (stampTypeRef.current === "shooting_star") {
-        stamp = createShootingStarStamp(worldPos);
-      } else {
-        stamp = createCowStamp(worldPos);
+      let obj: PlacedObject;
+      switch (objectTypeRef.current) {
+        case "cube":
+          obj = createCube(worldPos);
+          break;
+        case "box":
+          obj = createBox(worldPos);
+          break;
+        case "sphere":
+          obj = createSphere(worldPos);
+          break;
+        case "shooting_star":
+          obj = createShootingStar(worldPos);
+          break;
+        case "cow":
+          obj = createCow(worldPos);
+          break;
+        default:
+          obj = createCube(worldPos);
       }
-      stampsRef.current.push(stamp);
+      objectsRef.current.push(obj);
     };
 
     // オブジェクトを安全に破棄（useEffect内用）
@@ -1075,10 +1228,10 @@ export function ThreeCanvas() {
     const handlePointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
 
-      // スタンプモード
-      if (modeRef.current === "stamp") {
+      // オブジェクトモード
+      if (modeRef.current === "object") {
         e.preventDefault();
-        placeStamp(e.clientX, e.clientY);
+        placeObject(e.clientX, e.clientY);
         return;
       }
 
@@ -1239,16 +1392,19 @@ export function ThreeCanvas() {
     });
     strokesRef.current = [];
 
-    // スタンプも削除
-    stampsRef.current.forEach((stamp) => {
-      if (stamp.group) {
-        disposeMesh(stamp.group);
+    // オブジェクトも削除
+    objectsRef.current.forEach((obj) => {
+      if (obj.group) {
+        disposeMesh(obj.group);
       }
-      if (stamp.particles) {
-        disposeMesh(stamp.particles);
+      if (obj.mesh) {
+        disposeMesh(obj.mesh);
+      }
+      if (obj.particles) {
+        disposeMesh(obj.particles);
       }
     });
-    stampsRef.current = [];
+    objectsRef.current = [];
 
     setSelectedStroke(null);
   };
@@ -1294,7 +1450,7 @@ export function ThreeCanvas() {
       <div
         ref={containerRef}
         className="w-full h-full"
-        style={{ cursor: mode === "draw" ? "crosshair" : mode === "select" ? "pointer" : mode === "stamp" ? "cell" : "grab" }}
+        style={{ cursor: mode === "draw" ? "crosshair" : mode === "select" ? "pointer" : mode === "object" ? "cell" : "grab" }}
       />
 
       <ControlPanel
@@ -1308,10 +1464,10 @@ export function ThreeCanvas() {
         setDrawDistance={setDrawDistance}
         penType={penType}
         setPenType={setPenType}
-        stampType={stampType}
-        setStampType={setStampType}
-        stampGravity={stampGravity}
-        setStampGravity={setStampGravity}
+        objectType={objectType}
+        setObjectType={setObjectType}
+        objectGravity={objectGravity}
+        setObjectGravity={setObjectGravity}
         onClear={clearAll}
       />
 
