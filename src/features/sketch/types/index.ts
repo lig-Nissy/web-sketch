@@ -1,1 +1,1 @@
-export type { Stroke, DrawingState } from "./stroke";
+export type { Stroke, DrawingState, PenType } from "./stroke";

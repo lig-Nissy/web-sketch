@@ -1,6 +1,15 @@
 "use client";
 
+import type { PenType } from "../types";
+
 type Mode = "draw" | "select" | "camera";
+
+const PEN_TYPES: { type: PenType; label: string; icon: string }[] = [
+  { type: "normal", label: "通常", icon: "✏️" },
+  { type: "fire", label: "炎", icon: "🔥" },
+  { type: "star", label: "星", icon: "✨" },
+  { type: "mirror", label: "鏡", icon: "🪞" },
+];
 
 const COLORS = [
   "#ff6b6b",
@@ -22,6 +31,8 @@ interface ControlPanelProps {
   setThickness: (value: number) => void;
   drawDistance: number;
   setDrawDistance: (value: number) => void;
+  penType: PenType;
+  setPenType: (value: PenType) => void;
   onClear: () => void;
 }
 
@@ -34,6 +45,8 @@ export function ControlPanel({
   setThickness,
   drawDistance,
   setDrawDistance,
+  penType,
+  setPenType,
   onClear,
 }: ControlPanelProps) {
   return (
@@ -78,6 +91,27 @@ export function ControlPanel({
       >
         🗑️ クリア
       </button>
+
+      {/* ペン種類 */}
+      <div className="bg-black/50 p-3 rounded-lg">
+        <p className="text-white text-sm mb-2">ペン種類</p>
+        <div className="flex gap-2">
+          {PEN_TYPES.map((pen) => (
+            <button
+              key={pen.type}
+              onClick={() => setPenType(pen.type)}
+              className={`px-3 py-2 rounded-lg text-sm transition-all ${
+                penType === pen.type
+                  ? "bg-yellow-500 text-black shadow-lg"
+                  : "bg-gray-700 text-white hover:bg-gray-600"
+              }`}
+              title={pen.label}
+            >
+              {pen.icon}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* カラーパレット */}
       <div className="bg-black/50 p-3 rounded-lg">

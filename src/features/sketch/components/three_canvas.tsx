@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { useThreeScene } from "../hooks/use_three_scene";
 import { ControlPanel } from "./control_panel";
 import { HelpPanel } from "./help_panel";
-import type { Stroke } from "../types";
+import type { Stroke, PenType } from "../types";
 
 type Mode = "draw" | "select" | "camera";
 
@@ -14,8 +14,9 @@ export function ThreeCanvas() {
   const [currentColor, setCurrentColor] = useState("#ff6b6b");
   const [thickness, setThickness] = useState(0.1);
   const [drawDistance, setDrawDistance] = useState(10);
+  const [penType, setPenType] = useState<PenType>("normal");
 
-  const { containerRef, canvas, scene, camera, controlsRef, raycastTargets, isDrawingRef } = useThreeScene();
+  const { containerRef, canvas, scene, camera, controlsRef, raycastTargets, isDrawingRef, onAnimateRef } = useThreeScene();
 
   const strokesRef = useRef<Stroke[]>([]);
   const currentStrokeRef = useRef<Stroke | null>(null);
@@ -32,10 +33,13 @@ export function ThreeCanvas() {
   const drawDistanceRef = useRef(drawDistance);
   const selectedStrokeRef = useRef<Stroke | null>(null);
 
+  const penTypeRef = useRef(penType);
+
   useEffect(() => { currentColorRef.current = currentColor; }, [currentColor]);
   useEffect(() => { thicknessRef.current = thickness; }, [thickness]);
   useEffect(() => { drawDistanceRef.current = drawDistance; }, [drawDistance]);
   useEffect(() => { selectedStrokeRef.current = selectedStroke; }, [selectedStroke]);
+  useEffect(() => { penTypeRef.current = penType; }, [penType]);
 
   // モード切り替え時のコントロール制御
   useEffect(() => {
@@ -47,6 +51,50 @@ export function ThreeCanvas() {
   // raycastTargetsをrefで保持
   const raycastTargetsRef = useRef<THREE.Mesh[]>([]);
   useEffect(() => { raycastTargetsRef.current = raycastTargets; }, [raycastTargets]);
+
+  // パーティクルアニメーション
+  useEffect(() => {
+    if (!onAnimateRef) return;
+
+    const animateParticles = () => {
+      const time = Date.now() * 0.001;
+
+      strokesRef.current.forEach((stroke) => {
+        if (!stroke.particles) return;
+
+        const positions = stroke.particles.geometry.attributes.position;
+        const sizes = stroke.particles.geometry.attributes.size;
+
+        if (stroke.penType === "fire") {
+          // 炎: 上に揺らめく
+          for (let i = 0; i < positions.count; i++) {
+            const y = positions.getY(i);
+            positions.setY(i, y + Math.sin(time * 5 + i) * 0.02);
+            positions.setX(i, positions.getX(i) + Math.sin(time * 3 + i * 0.5) * 0.01);
+
+            // サイズを変動
+            const baseSize = sizes.array[i];
+            sizes.setX(i, baseSize * (0.8 + Math.sin(time * 10 + i) * 0.2));
+          }
+          positions.needsUpdate = true;
+          sizes.needsUpdate = true;
+        } else if (stroke.penType === "star") {
+          // 星: キラキラ点滅
+          for (let i = 0; i < sizes.count; i++) {
+            const baseSize = stroke.thickness * (1 + Math.random() * 0.5);
+            sizes.setX(i, baseSize * (0.5 + Math.abs(Math.sin(time * 8 + i * 2)) * 0.5));
+          }
+          sizes.needsUpdate = true;
+        }
+      });
+    };
+
+    onAnimateRef.current = animateParticles;
+
+    return () => {
+      onAnimateRef.current = null;
+    };
+  }, [onAnimateRef]);
 
   // Canvas にイベントを直接アタッチ
   useEffect(() => {
@@ -191,11 +239,159 @@ export function ThreeCanvas() {
       });
     };
 
+    // ペンタイプに応じたマテリアルを作成
+    const createMaterial = (stroke: Stroke): THREE.Material => {
+      switch (stroke.penType) {
+        case "fire":
+          return new THREE.MeshPhongMaterial({
+            color: stroke.color,
+            emissive: stroke.color,
+            emissiveIntensity: 0.5,
+            shininess: 50,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.9,
+          });
+        case "star":
+          return new THREE.MeshPhongMaterial({
+            color: stroke.color,
+            emissive: 0xffffff,
+            emissiveIntensity: 0.3,
+            shininess: 200,
+            specular: 0xffffff,
+            side: THREE.DoubleSide,
+          });
+        case "mirror":
+          return new THREE.MeshPhongMaterial({
+            color: stroke.color,
+            shininess: 300,
+            specular: 0xffffff,
+            reflectivity: 1,
+            side: THREE.DoubleSide,
+            envMap: scene.environment,
+          });
+        default:
+          return new THREE.MeshPhongMaterial({
+            color: stroke.color,
+            shininess: 100,
+            specular: 0x444444,
+            side: THREE.DoubleSide,
+          });
+      }
+    };
+
+    // 炎パーティクルを作成
+    const createFireParticles = (stroke: Stroke, curve: THREE.CatmullRomCurve3) => {
+      const particleCount = Math.max(stroke.points.length * 20, 100);
+      const positions = new Float32Array(particleCount * 3);
+      const colors = new Float32Array(particleCount * 3);
+      const sizes = new Float32Array(particleCount);
+
+      const baseColor = new THREE.Color(stroke.color);
+      const fireColors = [
+        new THREE.Color(0xff4500), // オレンジレッド
+        new THREE.Color(0xff6600), // オレンジ
+        new THREE.Color(0xffcc00), // 黄色
+        baseColor,
+      ];
+
+      for (let i = 0; i < particleCount; i++) {
+        const t = Math.random();
+        const point = curve.getPointAt(t);
+        const offset = new THREE.Vector3(
+          (Math.random() - 0.5) * stroke.thickness * 4,
+          Math.random() * stroke.thickness * 3,
+          (Math.random() - 0.5) * stroke.thickness * 4
+        );
+        positions[i * 3] = point.x + offset.x;
+        positions[i * 3 + 1] = point.y + offset.y;
+        positions[i * 3 + 2] = point.z + offset.z;
+
+        const color = fireColors[Math.floor(Math.random() * fireColors.length)];
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+
+        sizes[i] = Math.random() * stroke.thickness * 3 + stroke.thickness;
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
+
+      const material = new THREE.PointsMaterial({
+        size: stroke.thickness * 2,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+
+      return new THREE.Points(geometry, material);
+    };
+
+    // 星パーティクルを作成
+    const createStarParticles = (stroke: Stroke, curve: THREE.CatmullRomCurve3) => {
+      const particleCount = Math.max(stroke.points.length * 50, 200);
+      const positions = new Float32Array(particleCount * 3);
+      const colors = new Float32Array(particleCount * 3);
+      const sizes = new Float32Array(particleCount);
+
+      const sparkleColors = [
+        new THREE.Color(0xffffff),
+        new THREE.Color(0xffffaa),
+        new THREE.Color(0xaaffff),
+        new THREE.Color(stroke.color),
+      ];
+
+      for (let i = 0; i < particleCount; i++) {
+        const t = Math.random();
+        const point = curve.getPointAt(t);
+        const offset = new THREE.Vector3(
+          (Math.random() - 0.5) * stroke.thickness * 3,
+          (Math.random() - 0.5) * stroke.thickness * 3,
+          (Math.random() - 0.5) * stroke.thickness * 3
+        );
+        positions[i * 3] = point.x + offset.x;
+        positions[i * 3 + 1] = point.y + offset.y;
+        positions[i * 3 + 2] = point.z + offset.z;
+
+        const color = sparkleColors[Math.floor(Math.random() * sparkleColors.length)];
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+
+        sizes[i] = Math.random() * stroke.thickness * 0.5 + stroke.thickness * 0.1;
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
+
+      const material = new THREE.PointsMaterial({
+        size: stroke.thickness * 0.4,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+
+      return new THREE.Points(geometry, material);
+    };
+
     const updateStrokeMesh = (stroke: Stroke) => {
       if (stroke.points.length < 2) return;
 
       if (stroke.mesh) {
         disposeObject(stroke.mesh);
+      }
+      if (stroke.particles) {
+        disposeObject(stroke.particles);
+        stroke.particles = undefined;
       }
 
       const curve = new THREE.CatmullRomCurve3(stroke.points);
@@ -208,12 +404,7 @@ export function ThreeCanvas() {
         false
       );
 
-      const material = new THREE.MeshPhongMaterial({
-        color: stroke.color,
-        shininess: 100,
-        specular: 0x444444,
-        side: THREE.DoubleSide,
-      });
+      const material = createMaterial(stroke);
 
       // カーブの実際の端点と接線を取得
       const startPoint = curve.getPointAt(0);
@@ -248,7 +439,26 @@ export function ThreeCanvas() {
         endTangent
       );
 
-      // チューブとキャップをグループ化
+      // 特殊ペンのパーティクル追加（炎・星は線なし）
+      if (stroke.penType === "fire") {
+        const particles = createFireParticles(stroke, curve);
+        stroke.particles = particles;
+        scene.add(particles);
+        // 空のグループをmeshとして保持（レイキャスト用）
+        const group = new THREE.Group();
+        stroke.mesh = group as unknown as THREE.Mesh;
+        return;
+      } else if (stroke.penType === "star") {
+        const particles = createStarParticles(stroke, curve);
+        stroke.particles = particles;
+        scene.add(particles);
+        // 空のグループをmeshとして保持
+        const group = new THREE.Group();
+        stroke.mesh = group as unknown as THREE.Mesh;
+        return;
+      }
+
+      // 通常・鏡ペンはチューブとキャップをグループ化
       const group = new THREE.Group();
       const tubeMesh = new THREE.Mesh(tubeGeometry, material);
       group.add(tubeMesh);
@@ -447,6 +657,7 @@ export function ThreeCanvas() {
           points: [worldPos.clone()],
           color: currentColorRef.current,
           thickness: thicknessRef.current,
+          penType: penTypeRef.current,
           isSolidified: false,
         };
       }
@@ -529,6 +740,9 @@ export function ThreeCanvas() {
       if (stroke.mesh) {
         disposeMesh(stroke.mesh);
       }
+      if (stroke.particles) {
+        disposeMesh(stroke.particles);
+      }
       if (stroke.startMarker) {
         disposeMesh(stroke.startMarker);
       }
@@ -557,6 +771,8 @@ export function ThreeCanvas() {
         setThickness={setThickness}
         drawDistance={drawDistance}
         setDrawDistance={setDrawDistance}
+        penType={penType}
+        setPenType={setPenType}
         onClear={clearAll}
       />
 

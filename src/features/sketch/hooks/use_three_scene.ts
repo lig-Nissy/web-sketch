@@ -13,6 +13,7 @@ interface UseThreeSceneReturn {
   cameraPosition: THREE.Vector3 | null;
   raycastTargets: THREE.Mesh[];
   isDrawingRef: React.RefObject<boolean>;
+  onAnimateRef: React.RefObject<(() => void) | null>;
 }
 
 // 球面レイヤー（視覚的なガイド用）
@@ -28,6 +29,7 @@ export function useThreeScene(): UseThreeSceneReturn {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const initializedRef = useRef(false);
   const isDrawingRef = useRef(false);
+  const onAnimateRef = useRef<(() => void) | null>(null);
 
   const containerRef = useCallback((container: HTMLDivElement | null) => {
     if (!container || initializedRef.current) return;
@@ -130,10 +132,16 @@ export function useThreeScene(): UseThreeSceneReturn {
 
     // isDrawingRefへの参照を保持
     const drawingRef = isDrawingRef;
+    const animateCallbackRef = onAnimateRef;
 
     // アニメーションループ
     const animate = () => {
       requestAnimationFrame(animate);
+
+      // カスタムアニメーションコールバック
+      if (animateCallbackRef.current) {
+        animateCallbackRef.current();
+      }
 
       // 描画中はWASD移動を無効にする
       if (!drawingRef.current) {
@@ -199,5 +207,6 @@ export function useThreeScene(): UseThreeSceneReturn {
     cameraPosition,
     raycastTargets,
     isDrawingRef,
+    onAnimateRef,
   };
 }
