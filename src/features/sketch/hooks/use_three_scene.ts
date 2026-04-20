@@ -22,8 +22,8 @@ interface UseThreeSceneReturn {
   collisionCheckRef: React.RefObject<((pos: THREE.Vector3) => CollisionResult) | null>;
 }
 
-// 球面レイヤー（視覚的なガイド用）
-const SPHERE_LAYERS = [5, 15, 30, 50];
+// 球面レイヤー（視覚的なガイド用）- 現在は非表示
+// const SPHERE_LAYERS = [5, 15, 30, 50];
 
 export function useThreeScene(): UseThreeSceneReturn {
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
@@ -48,21 +48,21 @@ export function useThreeScene(): UseThreeSceneReturn {
 
     const targets: THREE.Mesh[] = [];
 
-    // 球面ワイヤーフレーム（視覚的なガイド）
-    SPHERE_LAYERS.forEach((radius, index) => {
-      const sphereGeometry = new THREE.SphereGeometry(radius, 32, 24);
-      const sphereWireframe = new THREE.WireframeGeometry(sphereGeometry);
-      const opacity = 0.15 + index * 0.05;
-      const sphereLine = new THREE.LineSegments(
-        sphereWireframe,
-        new THREE.LineBasicMaterial({
-          color: 0x333355,
-          opacity,
-          transparent: true,
-        })
-      );
-      newScene.add(sphereLine);
-    });
+    // 球面ワイヤーフレーム（視覚的なガイド）- 非表示
+    // SPHERE_LAYERS.forEach((radius, index) => {
+    //   const sphereGeometry = new THREE.SphereGeometry(radius, 32, 24);
+    //   const sphereWireframe = new THREE.WireframeGeometry(sphereGeometry);
+    //   const opacity = 0.15 + index * 0.05;
+    //   const sphereLine = new THREE.LineSegments(
+    //     sphereWireframe,
+    //     new THREE.LineBasicMaterial({
+    //       color: 0x333355,
+    //       opacity,
+    //       transparent: true,
+    //     })
+    //   );
+    //   newScene.add(sphereLine);
+    // });
 
     // 床（BoxGeometry で薄い平面）
     const floorGeometry = new THREE.BoxGeometry(100, 0.1, 100);
