@@ -1,14 +1,19 @@
 "use client";
 
-import type { PenType } from "../types";
+import type { PenType, StampType } from "../types";
 
-type Mode = "draw" | "select" | "camera";
+type Mode = "draw" | "select" | "camera" | "stamp";
 
 const PEN_TYPES: { type: PenType; label: string; icon: string }[] = [
   { type: "normal", label: "通常", icon: "✏️" },
   { type: "fire", label: "炎", icon: "🔥" },
   { type: "star", label: "星", icon: "✨" },
   { type: "mirror", label: "鏡", icon: "🪞" },
+];
+
+const STAMP_TYPES: { type: StampType; label: string; icon: string }[] = [
+  { type: "shooting_star", label: "流れ星", icon: "🌠" },
+  { type: "cow", label: "牛", icon: "🐄" },
 ];
 
 const COLORS = [
@@ -33,6 +38,8 @@ interface ControlPanelProps {
   setDrawDistance: (value: number) => void;
   penType: PenType;
   setPenType: (value: PenType) => void;
+  stampType: StampType;
+  setStampType: (value: StampType) => void;
   onClear: () => void;
 }
 
@@ -47,6 +54,8 @@ export function ControlPanel({
   setDrawDistance,
   penType,
   setPenType,
+  stampType,
+  setStampType,
   onClear,
 }: ControlPanelProps) {
   return (
@@ -83,6 +92,16 @@ export function ControlPanel({
         >
           🔄 カメラ
         </button>
+        <button
+          onClick={() => setMode("stamp")}
+          className={`px-4 py-2 rounded-lg font-medium transition-all ${
+            mode === "stamp"
+              ? "bg-orange-500 text-white shadow-lg shadow-orange-500/30"
+              : "bg-gray-600 text-white hover:bg-gray-500"
+          }`}
+        >
+          🎨 スタンプ
+        </button>
       </div>
 
       <button
@@ -92,26 +111,51 @@ export function ControlPanel({
         🗑️ クリア
       </button>
 
-      {/* ペン種類 */}
-      <div className="bg-black/50 p-3 rounded-lg">
-        <p className="text-white text-sm mb-2">ペン種類</p>
-        <div className="flex gap-2">
-          {PEN_TYPES.map((pen) => (
-            <button
-              key={pen.type}
-              onClick={() => setPenType(pen.type)}
-              className={`px-3 py-2 rounded-lg text-sm transition-all ${
-                penType === pen.type
-                  ? "bg-yellow-500 text-black shadow-lg"
-                  : "bg-gray-700 text-white hover:bg-gray-600"
-              }`}
-              title={pen.label}
-            >
-              {pen.icon}
-            </button>
-          ))}
+      {/* ペン種類（描画モード時のみ表示） */}
+      {mode === "draw" && (
+        <div className="bg-black/50 p-3 rounded-lg">
+          <p className="text-white text-sm mb-2">ペン種類</p>
+          <div className="flex gap-2">
+            {PEN_TYPES.map((pen) => (
+              <button
+                key={pen.type}
+                onClick={() => setPenType(pen.type)}
+                className={`px-3 py-2 rounded-lg text-sm transition-all ${
+                  penType === pen.type
+                    ? "bg-yellow-500 text-black shadow-lg"
+                    : "bg-gray-700 text-white hover:bg-gray-600"
+                }`}
+                title={pen.label}
+              >
+                {pen.icon}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* スタンプ種類（スタンプモード時のみ表示） */}
+      {mode === "stamp" && (
+        <div className="bg-black/50 p-3 rounded-lg">
+          <p className="text-white text-sm mb-2">スタンプ種類</p>
+          <div className="flex gap-2">
+            {STAMP_TYPES.map((stamp) => (
+              <button
+                key={stamp.type}
+                onClick={() => setStampType(stamp.type)}
+                className={`px-3 py-2 rounded-lg text-sm transition-all ${
+                  stampType === stamp.type
+                    ? "bg-orange-500 text-white shadow-lg"
+                    : "bg-gray-700 text-white hover:bg-gray-600"
+                }`}
+                title={stamp.label}
+              >
+                {stamp.icon}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* カラーパレット */}
       <div className="bg-black/50 p-3 rounded-lg">

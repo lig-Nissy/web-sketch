@@ -5,9 +5,9 @@ import * as THREE from "three";
 import { useThreeScene } from "../hooks/use_three_scene";
 import { ControlPanel } from "./control_panel";
 import { HelpPanel } from "./help_panel";
-import type { Stroke, PenType } from "../types";
+import type { Stroke, PenType, StampType, Stamp } from "../types";
 
-type Mode = "draw" | "select" | "camera";
+type Mode = "draw" | "select" | "camera" | "stamp";
 
 export function ThreeCanvas() {
   const [mode, setMode] = useState<Mode>("draw");
@@ -15,14 +15,19 @@ export function ThreeCanvas() {
   const [thickness, setThickness] = useState(0.1);
   const [drawDistance, setDrawDistance] = useState(10);
   const [penType, setPenType] = useState<PenType>("normal");
+  const [stampType, setStampType] = useState<StampType>("shooting_star");
 
-  const { containerRef, canvas, scene, camera, controlsRef, raycastTargets, isDrawingRef, onAnimateRef } = useThreeScene();
+  const { containerRef, canvas, scene, camera, controlsRef, raycastTargets, isDrawingRef, onAnimateRef, collisionCheckRef } = useThreeScene();
 
   const strokesRef = useRef<Stroke[]>([]);
+  const stampsRef = useRef<Stamp[]>([]);
   const currentStrokeRef = useRef<Stroke | null>(null);
   const drawModeTypeRef = useRef<"floor" | "air" | "forceFloor" | null>(null);
   const fixedDrawDistanceRef = useRef<number | null>(null);
   const [selectedStroke, setSelectedStroke] = useState<Stroke | null>(null);
+
+  const stampTypeRef = useRef(stampType);
+  useEffect(() => { stampTypeRef.current = stampType; }, [stampType]);
 
   // 最新の値をrefで保持
   const modeRef = useRef(mode);
@@ -52,6 +57,52 @@ export function ThreeCanvas() {
   const raycastTargetsRef = useRef<THREE.Mesh[]>([]);
   useEffect(() => { raycastTargetsRef.current = raycastTargets; }, [raycastTargets]);
 
+  // ストロークとの衝突判定
+  useEffect(() => {
+    if (!collisionCheckRef) return;
+
+    const COLLISION_RADIUS = 0.5; // プレイヤーの当たり判定半径
+
+    const checkCollision = (pos: THREE.Vector3): boolean => {
+      for (const stroke of strokesRef.current) {
+        if (!stroke.isSolidified || stroke.points.length < 2) continue;
+
+        // ストロークの各セグメントとの距離をチェック
+        for (let i = 0; i < stroke.points.length - 1; i++) {
+          const p1 = stroke.points[i];
+          const p2 = stroke.points[i + 1];
+
+          // 線分と点の最短距離を計算
+          const line = new THREE.Vector3().subVectors(p2, p1);
+          const lineLength = line.length();
+          if (lineLength === 0) continue;
+
+          const lineDir = line.normalize();
+          const toPos = new THREE.Vector3().subVectors(pos, p1);
+
+          // 線分上の最近接点を求める
+          let t = toPos.dot(lineDir);
+          t = Math.max(0, Math.min(lineLength, t));
+
+          const closestPoint = p1.clone().add(lineDir.multiplyScalar(t));
+          const distance = pos.distanceTo(closestPoint);
+
+          // 衝突判定（ストロークの太さ + プレイヤー半径）
+          if (distance < stroke.thickness + COLLISION_RADIUS) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    collisionCheckRef.current = checkCollision;
+
+    return () => {
+      collisionCheckRef.current = null;
+    };
+  }, [collisionCheckRef]);
+
   // パーティクルアニメーション
   useEffect(() => {
     if (!onAnimateRef) return;
@@ -59,6 +110,7 @@ export function ThreeCanvas() {
     const animateParticles = () => {
       const time = Date.now() * 0.001;
 
+      // ストロークのパーティクルアニメーション
       strokesRef.current.forEach((stroke) => {
         if (!stroke.particles) return;
 
@@ -85,6 +137,29 @@ export function ThreeCanvas() {
             sizes.setX(i, baseSize * (0.5 + Math.abs(Math.sin(time * 8 + i * 2)) * 0.5));
           }
           sizes.needsUpdate = true;
+        }
+      });
+
+      // スタンプのアニメーション
+      stampsRef.current.forEach((stamp) => {
+        if (stamp.type === "shooting_star" && stamp.particles) {
+          // 流れ星: パーティクルを斜め下に流す
+          const positions = stamp.particles.geometry.attributes.position;
+          const initialPositions = stamp.animationData?.initialPositions as Float32Array;
+
+          if (initialPositions) {
+            for (let i = 0; i < positions.count; i++) {
+              const offset = (time * 3 + i * 0.1) % 2;
+              positions.setX(i, initialPositions[i * 3] + offset * 2);
+              positions.setY(i, initialPositions[i * 3 + 1] - offset * 2);
+              positions.setZ(i, initialPositions[i * 3 + 2]);
+            }
+            positions.needsUpdate = true;
+          }
+        } else if (stamp.type === "cow" && stamp.group) {
+          // 牛: ゆらゆら揺れる
+          stamp.group.rotation.y = Math.sin(time * 2) * 0.1;
+          stamp.group.position.y = (stamp.animationData?.baseY as number || 0) + Math.sin(time * 3) * 0.1;
         }
       });
     };
@@ -238,12 +313,181 @@ export function ThreeCanvas() {
 
     // スクロールで描画距離を調整
     const handleWheel = (e: WheelEvent) => {
-      if (modeRef.current !== "draw") return;
+      if (modeRef.current !== "draw" && modeRef.current !== "stamp") return;
       if (isDrawingRef.current) return; // 描画中は変更不可
       e.preventDefault();
 
       const delta = e.deltaY > 0 ? -1 : 1;
       setDrawDistance(prev => Math.max(2, Math.min(60, prev + delta)));
+    };
+
+    // 流れ星スタンプを作成
+    const createShootingStarStamp = (position: THREE.Vector3): Stamp => {
+      const particleCount = 50;
+      const positions = new Float32Array(particleCount * 3);
+      const colors = new Float32Array(particleCount * 3);
+      const sizes = new Float32Array(particleCount);
+
+      const starColors = [
+        new THREE.Color(0xffff00),
+        new THREE.Color(0xffffaa),
+        new THREE.Color(0xffffff),
+      ];
+
+      for (let i = 0; i < particleCount; i++) {
+        // 斜めに配置
+        const t = i / particleCount;
+        positions[i * 3] = position.x - t * 2;
+        positions[i * 3 + 1] = position.y + t * 2;
+        positions[i * 3 + 2] = position.z;
+
+        const color = starColors[Math.floor(Math.random() * starColors.length)];
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+
+        sizes[i] = 0.1 + Math.random() * 0.2;
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
+
+      const material = new THREE.PointsMaterial({
+        size: 0.3,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+
+      const particles = new THREE.Points(geometry, material);
+      scene.add(particles);
+
+      return {
+        id: Math.random().toString(36).substring(2, 9),
+        type: "shooting_star",
+        position: position.clone(),
+        particles,
+        animationData: {
+          initialPositions: positions.slice(), // 初期位置を保存
+        },
+      };
+    };
+
+    // 牛スタンプを作成
+    const createCowStamp = (position: THREE.Vector3): Stamp => {
+      const group = new THREE.Group();
+
+      // 体
+      const bodyGeometry = new THREE.BoxGeometry(1.2, 0.8, 0.7);
+      const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
+      const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+      body.position.y = 0.5;
+      group.add(body);
+
+      // 頭
+      const headGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+      const head = new THREE.Mesh(headGeometry, bodyMaterial);
+      head.position.set(0.7, 0.7, 0);
+      group.add(head);
+
+      // 目（左右）
+      const eyeGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+      const eyeMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+      const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+      leftEye.position.set(0.95, 0.75, 0.15);
+      group.add(leftEye);
+      const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+      rightEye.position.set(0.95, 0.75, -0.15);
+      group.add(rightEye);
+
+      // 鼻
+      const noseGeometry = new THREE.BoxGeometry(0.15, 0.15, 0.3);
+      const noseMaterial = new THREE.MeshPhongMaterial({ color: 0xffcccc });
+      const nose = new THREE.Mesh(noseGeometry, noseMaterial);
+      nose.position.set(0.95, 0.55, 0);
+      group.add(nose);
+
+      // 角（左右）
+      const hornGeometry = new THREE.ConeGeometry(0.08, 0.3, 8);
+      const hornMaterial = new THREE.MeshPhongMaterial({ color: 0xccccaa });
+      const leftHorn = new THREE.Mesh(hornGeometry, hornMaterial);
+      leftHorn.position.set(0.65, 1.05, 0.2);
+      leftHorn.rotation.z = -0.3;
+      group.add(leftHorn);
+      const rightHorn = new THREE.Mesh(hornGeometry, hornMaterial);
+      rightHorn.position.set(0.65, 1.05, -0.2);
+      rightHorn.rotation.z = -0.3;
+      group.add(rightHorn);
+
+      // 足（4本）
+      const legGeometry = new THREE.BoxGeometry(0.15, 0.4, 0.15);
+      const legMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
+      const legPositions = [
+        [0.4, 0.2, 0.2],
+        [0.4, 0.2, -0.2],
+        [-0.4, 0.2, 0.2],
+        [-0.4, 0.2, -0.2],
+      ];
+      legPositions.forEach(([x, y, z]) => {
+        const leg = new THREE.Mesh(legGeometry, legMaterial);
+        leg.position.set(x, y, z);
+        group.add(leg);
+      });
+
+      // 斑点
+      const spotGeometry = new THREE.SphereGeometry(0.15, 8, 8);
+      const spotMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+      const spotPositions = [
+        [0.2, 0.7, 0.35],
+        [-0.3, 0.6, 0.35],
+        [0, 0.8, -0.35],
+        [-0.4, 0.5, -0.35],
+      ];
+      spotPositions.forEach(([x, y, z]) => {
+        const spot = new THREE.Mesh(spotGeometry, spotMaterial);
+        spot.position.set(x, y, z);
+        spot.scale.set(1, 0.5, 0.3);
+        group.add(spot);
+      });
+
+      // 尻尾
+      const tailGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.5, 8);
+      const tail = new THREE.Mesh(tailGeometry, bodyMaterial);
+      tail.position.set(-0.7, 0.5, 0);
+      tail.rotation.z = Math.PI / 4;
+      group.add(tail);
+
+      group.position.copy(position);
+      group.position.y = position.y;
+      scene.add(group);
+
+      return {
+        id: Math.random().toString(36).substring(2, 9),
+        type: "cow",
+        position: position.clone(),
+        group,
+        animationData: {
+          baseY: position.y,
+        },
+      };
+    };
+
+    // スタンプを配置
+    const placeStamp = (clientX: number, clientY: number) => {
+      const worldPos = getWorldPosition(clientX, clientY);
+      if (!worldPos) return;
+
+      let stamp: Stamp;
+      if (stampTypeRef.current === "shooting_star") {
+        stamp = createShootingStarStamp(worldPos);
+      } else {
+        stamp = createCowStamp(worldPos);
+      }
+      stampsRef.current.push(stamp);
     };
 
     // オブジェクトを安全に破棄（useEffect内用）
@@ -617,6 +861,13 @@ export function ThreeCanvas() {
     const handlePointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
 
+      // スタンプモード
+      if (modeRef.current === "stamp") {
+        e.preventDefault();
+        placeStamp(e.clientX, e.clientY);
+        return;
+      }
+
       // 選択モード
       if (modeRef.current === "select") {
         e.preventDefault();
@@ -773,6 +1024,18 @@ export function ThreeCanvas() {
       }
     });
     strokesRef.current = [];
+
+    // スタンプも削除
+    stampsRef.current.forEach((stamp) => {
+      if (stamp.group) {
+        disposeMesh(stamp.group);
+      }
+      if (stamp.particles) {
+        disposeMesh(stamp.particles);
+      }
+    });
+    stampsRef.current = [];
+
     setSelectedStroke(null);
   };
 
@@ -817,7 +1080,7 @@ export function ThreeCanvas() {
       <div
         ref={containerRef}
         className="w-full h-full"
-        style={{ cursor: mode === "draw" ? "crosshair" : mode === "select" ? "pointer" : "grab" }}
+        style={{ cursor: mode === "draw" ? "crosshair" : mode === "select" ? "pointer" : mode === "stamp" ? "cell" : "grab" }}
       />
 
       <ControlPanel
@@ -831,6 +1094,8 @@ export function ThreeCanvas() {
         setDrawDistance={setDrawDistance}
         penType={penType}
         setPenType={setPenType}
+        stampType={stampType}
+        setStampType={setStampType}
         onClear={clearAll}
       />
 

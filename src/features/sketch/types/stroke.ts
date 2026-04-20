@@ -1,6 +1,16 @@
 import * as THREE from "three";
 
 export type PenType = "normal" | "fire" | "star" | "mirror";
+export type StampType = "shooting_star" | "cow";
+
+export interface Stamp {
+  id: string;
+  type: StampType;
+  position: THREE.Vector3;
+  group?: THREE.Group;
+  particles?: THREE.Points;
+  animationData?: Record<string, unknown>;
+}
 
 export interface Stroke {
   id: string;

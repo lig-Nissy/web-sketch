@@ -14,6 +14,7 @@ interface UseThreeSceneReturn {
   raycastTargets: THREE.Mesh[];
   isDrawingRef: React.RefObject<boolean>;
   onAnimateRef: React.RefObject<(() => void) | null>;
+  collisionCheckRef: React.RefObject<((pos: THREE.Vector3) => boolean) | null>;
 }
 
 // 球面レイヤー（視覚的なガイド用）
@@ -30,6 +31,7 @@ export function useThreeScene(): UseThreeSceneReturn {
   const initializedRef = useRef(false);
   const isDrawingRef = useRef(false);
   const onAnimateRef = useRef<(() => void) | null>(null);
+  const collisionCheckRef = useRef<((pos: THREE.Vector3) => boolean) | null>(null);
 
   const containerRef = useCallback((container: HTMLDivElement | null) => {
     if (!container || initializedRef.current) return;
@@ -113,10 +115,23 @@ export function useThreeScene(): UseThreeSceneReturn {
     const keys = { w: false, a: false, s: false, d: false };
     const moveSpeed = 0.3;
 
+    // ジャンプ用の状態
+    let isJumping = false;
+    let jumpVelocity = 0;
+    const jumpStrength = 0.4;
+    const gravity = 0.015;
+    const groundY = 0; // 地面のカメラY位置
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       if (key in keys) {
         keys[key as keyof typeof keys] = true;
+      }
+      // スペースでジャンプ
+      if (e.code === "Space" && !isJumping) {
+        e.preventDefault();
+        isJumping = true;
+        jumpVelocity = jumpStrength;
       }
     };
 
@@ -133,6 +148,7 @@ export function useThreeScene(): UseThreeSceneReturn {
     // isDrawingRefへの参照を保持
     const drawingRef = isDrawingRef;
     const animateCallbackRef = onAnimateRef;
+    const collisionRef = collisionCheckRef;
 
     // アニメーションループ
     const animate = () => {
@@ -157,22 +173,42 @@ export function useThreeScene(): UseThreeSceneReturn {
 
         // 移動先の位置を計算して範囲内かチェック
         const tryMove = (delta: THREE.Vector3) => {
-          const newX = newCamera.position.x + delta.x;
-          const newZ = newCamera.position.z + delta.z;
+          const newPos = newCamera.position.clone().add(delta);
+          const newX = newPos.x;
+          const newZ = newPos.z;
 
-          // 範囲内なら移動
-          if (newX >= -BOUNDARY && newX <= BOUNDARY && newZ >= -BOUNDARY && newZ <= BOUNDARY) {
+          // 境界チェック
+          const withinBoundary = newX >= -BOUNDARY && newX <= BOUNDARY && newZ >= -BOUNDARY && newZ <= BOUNDARY;
+
+          // ストロークとの衝突チェック
+          const hasCollision = collisionRef.current ? collisionRef.current(newPos) : false;
+
+          // 範囲内かつ衝突なしなら移動
+          if (withinBoundary && !hasCollision) {
             newCamera.position.add(delta);
             controls.target.add(delta);
-          } else {
+          } else if (!withinBoundary) {
             // 壁に沿ってスライド（片方の軸だけ移動可能な場合）
-            if (newX >= -BOUNDARY && newX <= BOUNDARY) {
-              newCamera.position.x = newX;
-              controls.target.x += delta.x;
+            const slideX = newX >= -BOUNDARY && newX <= BOUNDARY;
+            const slideZ = newZ >= -BOUNDARY && newZ <= BOUNDARY;
+
+            if (slideX) {
+              const testPos = newCamera.position.clone();
+              testPos.x = newX;
+              const slideCollision = collisionRef.current ? collisionRef.current(testPos) : false;
+              if (!slideCollision) {
+                newCamera.position.x = newX;
+                controls.target.x += delta.x;
+              }
             }
-            if (newZ >= -BOUNDARY && newZ <= BOUNDARY) {
-              newCamera.position.z = newZ;
-              controls.target.z += delta.z;
+            if (slideZ) {
+              const testPos = newCamera.position.clone();
+              testPos.z = newZ;
+              const slideCollision = collisionRef.current ? collisionRef.current(testPos) : false;
+              if (!slideCollision) {
+                newCamera.position.z = newZ;
+                controls.target.z += delta.z;
+              }
             }
           }
         };
@@ -188,6 +224,34 @@ export function useThreeScene(): UseThreeSceneReturn {
         }
         if (keys.d) {
           tryMove(right.clone().multiplyScalar(moveSpeed));
+        }
+
+        // ジャンプ処理
+        if (isJumping) {
+          const newY = newCamera.position.y + jumpVelocity;
+          const testPos = newCamera.position.clone();
+          testPos.y = newY;
+
+          // ジャンプ中も衝突判定
+          const jumpCollision = collisionRef.current ? collisionRef.current(testPos) : false;
+          if (!jumpCollision) {
+            newCamera.position.y = newY;
+            controls.target.y += jumpVelocity;
+          } else {
+            // 衝突したら速度をリセット（上昇中に天井にぶつかった場合）
+            if (jumpVelocity > 0) {
+              jumpVelocity = 0;
+            }
+          }
+          jumpVelocity -= gravity;
+
+          // 着地判定
+          if (newCamera.position.y <= groundY) {
+            newCamera.position.y = groundY;
+            controls.target.y = groundY;
+            isJumping = false;
+            jumpVelocity = 0;
+          }
         }
       }
 
@@ -222,5 +286,6 @@ export function useThreeScene(): UseThreeSceneReturn {
     raycastTargets,
     isDrawingRef,
     onAnimateRef,
+    collisionCheckRef,
   };
 }
