@@ -77,6 +77,135 @@ export function useThreeScene(): UseThreeSceneReturn {
     newScene.add(floorMesh);
     targets.push(floorMesh);
 
+    // 看板を作成
+    const createSignboard = () => {
+      const group = new THREE.Group();
+
+      // 看板の板
+      const boardGeometry = new THREE.BoxGeometry(8, 5, 0.2);
+      const boardMaterial = new THREE.MeshPhongMaterial({ color: 0x8b4513 });
+      const board = new THREE.Mesh(boardGeometry, boardMaterial);
+      board.position.y = 2.5;
+      group.add(board);
+
+      // 支柱
+      const poleGeometry = new THREE.CylinderGeometry(0.15, 0.15, 5, 8);
+      const poleMaterial = new THREE.MeshPhongMaterial({ color: 0x654321 });
+      const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+      pole.position.set(0, 0, 0);
+      group.add(pole);
+
+      // テキストをCanvasで描画してテクスチャに
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 320;
+      const ctx = canvas.getContext("2d")!;
+
+      // 背景
+      ctx.fillStyle = "#f5deb3";
+      ctx.fillRect(0, 0, 512, 320);
+
+      // 枠線
+      ctx.strokeStyle = "#8b4513";
+      ctx.lineWidth = 8;
+      ctx.strokeRect(4, 4, 504, 312);
+
+      // タイトル
+      ctx.fillStyle = "#333";
+      ctx.font = "bold 32px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("Web Sketch", 256, 45);
+
+      // 操作方法
+      ctx.font = "20px sans-serif";
+      ctx.textAlign = "left";
+      const lines = [
+        "【操作方法】",
+        "WASD: 移動",
+        "Space: ジャンプ",
+        "マウス: 描画 / カメラ操作",
+        "Shift: 空中に描画",
+        "Option: 床に固定して描画",
+        "",
+        "【隠し要素】",
+        "🐄 + 🔥 = ???",
+      ];
+      lines.forEach((line, i) => {
+        ctx.fillText(line, 30, 80 + i * 26);
+      });
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const textGeometry = new THREE.PlaneGeometry(7, 4.4);
+      const textMaterial = new THREE.MeshBasicMaterial({ map: texture });
+      const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+      textMesh.position.set(0, 2.5, 0.15);
+      group.add(textMesh);
+
+      return group;
+    };
+
+    const signboard = createSignboard();
+    signboard.position.set(0, -5, -8);
+    newScene.add(signboard);
+
+    // ルール看板を作成
+    const createRuleSign = () => {
+      const group = new THREE.Group();
+
+      // 看板の板
+      const boardGeometry = new THREE.BoxGeometry(5, 3, 0.2);
+      const boardMaterial = new THREE.MeshPhongMaterial({ color: 0x2e8b57 });
+      const board = new THREE.Mesh(boardGeometry, boardMaterial);
+      board.position.y = 1.5;
+      group.add(board);
+
+      // 支柱
+      const poleGeometry = new THREE.CylinderGeometry(0.12, 0.12, 4, 8);
+      const poleMaterial = new THREE.MeshPhongMaterial({ color: 0x228b22 });
+      const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+      pole.position.set(0, -0.5, 0);
+      group.add(pole);
+
+      // テキストをCanvasで描画
+      const canvas = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 192;
+      const ctx = canvas.getContext("2d")!;
+
+      // 背景
+      ctx.fillStyle = "#fffacd";
+      ctx.fillRect(0, 0, 320, 192);
+
+      // 枠線
+      ctx.strokeStyle = "#2e8b57";
+      ctx.lineWidth = 6;
+      ctx.strokeRect(3, 3, 314, 186);
+
+      // タイトル
+      ctx.fillStyle = "#333";
+      ctx.font = "bold 28px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("📜 ルール", 160, 45);
+
+      // ルール
+      ctx.font = "bold 36px sans-serif";
+      ctx.fillText("好きに楽しむ！", 160, 120);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const textGeometry = new THREE.PlaneGeometry(4.4, 2.6);
+      const textMaterial = new THREE.MeshBasicMaterial({ map: texture });
+      const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+      textMesh.position.set(0, 1.5, 0.15);
+      group.add(textMesh);
+
+      return group;
+    };
+
+    const ruleSign = createRuleSign();
+    ruleSign.position.set(6, -5, -6);
+    ruleSign.rotation.y = -0.3;
+    newScene.add(ruleSign);
+
     // カメラを中心に配置
     const newCamera = new THREE.PerspectiveCamera(
       90,
