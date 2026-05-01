@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# web-sketch
 
-## Getting Started
+Three.js × Next.js で動く 3D 空間お絵描きアプリ。床や空中に線を描いたり、特殊ペンでエフェクトをかけたり、WASD でシーン内を歩き回れます。
 
-First, run the development server:
+## 技術スタック
+
+- Next.js 16 (App Router) / React 19
+- TypeScript 5
+- Three.js 0.184
+- Tailwind CSS v4
+- Radix UI (Dialog)
+
+## セットアップ
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+開発サーバーは `http://localhost:2400` で起動します。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## スクリプト
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| コマンド | 内容 |
+| --- | --- |
+| `npm run dev` | 開発サーバー起動 (port 2400) |
+| `npm run build` | 本番ビルド |
+| `npm run start` | 本番サーバー起動 |
+| `npm run lint` | ESLint 実行 |
 
-## Learn More
+## 操作方法
 
-To learn more about Next.js, take a look at the following resources:
+### ✏️ 描画モード
+- ドラッグ: 床や空中に描画
+- Shift+ドラッグ: 強制的に空中
+- Option+ドラッグ: 床に張り付く
+- ホイール: 描画距離調整
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 👆 選択モード
+- クリック: オブジェクト選択
+- 🟢緑/🔴赤マーカー: 続きから描画
+- Delete/⌫: 選択を削除
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 🔄 カメラモード
+- ドラッグ: 回転
+- ホイール: ズーム
 
-## Deploy on Vercel
+### ⌨️ 移動
+- WASD: 床の上を移動
+- Space: ジャンプ
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 🖌️ 特殊ペン
+- ✏️ 通常: 普通の線
+- 🔥 炎: めらめらエフェクト
+- ✨ 星: キラキラエフェクト
+- 🪞 鏡: 反射する線
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## ディレクトリ構成
+
+```
+src/
+├── app/                    # Next.js App Router エントリ
+└── features/
+    └── sketch/             # 3D スケッチ機能
+        ├── components/     # ThreeCanvas / ControlPanel / HelpPanel
+        ├── hooks/          # use_three_scene
+        ├── pages/          # SketchPage
+        ├── providers/
+        ├── types/
+        └── utils/
+```
+
+`src/app/page.tsx` は `SketchPage` を `ssr: false` で動的 import し、Three.js をクライアント側でのみ初期化しています。
