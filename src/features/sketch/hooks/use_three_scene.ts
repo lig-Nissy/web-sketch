@@ -518,6 +518,272 @@ export function useThreeScene(): UseThreeSceneReturn {
     newScene.add(coaster.group);
     const coasterUpdater = coaster.updater;
 
+    // ============================================================
+    // 観覧車（会場北側、コースターの外側に遠景として配置）
+    // ============================================================
+    const createFerrisWheel = () => {
+      const group = new THREE.Group();
+      const wheelRadius = 32;
+      const gondolaCount = 16;
+
+      // 中心軸を支える 2 本の脚 + 軸
+      const legMaterial = new THREE.MeshPhongMaterial({ color: 0x666666 });
+      const legHeight = wheelRadius + 6; // 地面からハブまで
+      const legSpread = 14;
+      [-legSpread, legSpread].forEach((xOff) => {
+        const legGeo = new THREE.CylinderGeometry(0.6, 0.9, legHeight, 8);
+        const leg = new THREE.Mesh(legGeo, legMaterial);
+        leg.position.set(xOff, legHeight / 2, 0);
+        // 軸に向かって少し倒す
+        leg.rotation.z = Math.atan2(xOff, legHeight) * -0.5;
+        group.add(leg);
+      });
+      // 軸（ハブ）
+      const hubGeo = new THREE.CylinderGeometry(1.0, 1.0, legSpread * 2 + 1, 16);
+      const hub = new THREE.Mesh(hubGeo, legMaterial);
+      hub.rotation.z = Math.PI / 2;
+      hub.position.y = legHeight;
+      group.add(hub);
+
+      // ホイール本体（回転する Group）
+      const wheel = new THREE.Group();
+      wheel.position.y = legHeight;
+      group.add(wheel);
+
+      // リング（外周 2 本 + 内周 1 本）
+      const ringMat = new THREE.MeshPhongMaterial({ color: 0xe74c3c, shininess: 60 });
+      const buildRing = (radius: number, tubeRadius: number, xOffset: number) => {
+        const ringGeo = new THREE.TorusGeometry(radius, tubeRadius, 8, 48);
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.rotation.y = Math.PI / 2; // x 軸まわりに見せるため yz 平面に
+        ring.position.x = xOffset;
+        wheel.add(ring);
+      };
+      const ringSpread = 5;
+      buildRing(wheelRadius, 0.3, -ringSpread);
+      buildRing(wheelRadius, 0.3, ringSpread);
+      buildRing(wheelRadius * 0.5, 0.2, 0);
+
+      // スポーク
+      const spokeMat = new THREE.MeshPhongMaterial({ color: 0xecf0f1 });
+      for (let i = 0; i < gondolaCount; i++) {
+        const angle = (i / gondolaCount) * Math.PI * 2;
+        [-ringSpread, ringSpread].forEach((xOff) => {
+          const spokeGeo = new THREE.CylinderGeometry(0.1, 0.1, wheelRadius * 2, 6);
+          const spoke = new THREE.Mesh(spokeGeo, spokeMat);
+          spoke.position.x = xOff;
+          spoke.rotation.x = angle;
+          wheel.add(spoke);
+        });
+      }
+
+      // ゴンドラ（counter-rotate して常に下向き）
+      const gondolaColors = [0xf1c40f, 0xe91e63, 0x3498db, 0x2ecc71, 0x9b59b6, 0xe67e22];
+      const gondolas: { pivot: THREE.Group; gondola: THREE.Group }[] = [];
+      for (let i = 0; i < gondolaCount; i++) {
+        const angle = (i / gondolaCount) * Math.PI * 2;
+        // pivot: ホイールに付随して回る空 Group。ゴンドラの吊り下げ点
+        const pivot = new THREE.Group();
+        pivot.position.set(0, Math.sin(angle) * wheelRadius, Math.cos(angle) * wheelRadius);
+        wheel.add(pivot);
+
+        // ゴンドラ本体（pivot の子。pivot 回転に対して逆回転で常に上向きキープ）
+        const gondola = new THREE.Group();
+        const cabinColor = gondolaColors[i % gondolaColors.length];
+        const cabin = new THREE.Mesh(
+          new THREE.BoxGeometry(3.4, 2.6, 3.4),
+          new THREE.MeshPhongMaterial({ color: cabinColor, shininess: 60 })
+        );
+        cabin.position.y = -2.5; // 吊り下げ位置
+        gondola.add(cabin);
+        // 屋根
+        const roof = new THREE.Mesh(
+          new THREE.ConeGeometry(2.5, 1.0, 4),
+          new THREE.MeshPhongMaterial({ color: 0x2c3e50 })
+        );
+        roof.position.y = -0.7;
+        roof.rotation.y = Math.PI / 4;
+        gondola.add(roof);
+        // 吊り下げ棒
+        const armGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.2, 6);
+        const arm = new THREE.Mesh(armGeo, spokeMat);
+        arm.position.y = -0.6;
+        gondola.add(arm);
+
+        pivot.add(gondola);
+        gondolas.push({ pivot, gondola });
+      }
+
+      // アニメーション
+      let wheelAngle = 0;
+      const wheelSpeed = 0.1; // rad/sec
+      const updater = (delta: number) => {
+        wheelAngle += wheelSpeed * delta;
+        wheel.rotation.x = wheelAngle;
+        // 各ゴンドラを counter-rotate して常に直立
+        gondolas.forEach(({ gondola }) => {
+          gondola.rotation.x = -wheelAngle;
+        });
+      };
+      updater(0);
+
+      return { group, updater };
+    };
+
+    const ferrisWheel = createFerrisWheel();
+    ferrisWheel.group.position.set(0, -5, -95); // 北、会場外
+    ferrisWheel.group.rotation.y = Math.PI / 2; // 観覧車の向きを 90 度回転
+    newScene.add(ferrisWheel.group);
+    const ferrisUpdater = ferrisWheel.updater;
+
+    // ============================================================
+    // 花火（夜空にランダムに打ち上がるパーティクル）
+    // ============================================================
+    interface Firework {
+      points: THREE.Points;
+      velocities: Float32Array;
+      ages: Float32Array;
+      lifetime: number;
+      phase: "rising" | "exploding";
+      riseTimer: number;
+      origin: THREE.Vector3;
+      explosionPos: THREE.Vector3;
+      color: THREE.Color;
+    }
+    const fireworks: Firework[] = [];
+    const fireworksGroup = new THREE.Group();
+    newScene.add(fireworksGroup);
+
+    const FIREWORK_COLORS = [
+      0xff4757, 0xffa502, 0xfffa65, 0x7bed9f, 0x70a1ff,
+      0xa55eea, 0xff6b9d, 0x48dbfb,
+    ];
+
+    const spawnFirework = () => {
+      // 打ち上げ位置（会場の上空、ランダム）
+      const origin = new THREE.Vector3(
+        (Math.random() - 0.5) * 120,
+        -5,
+        (Math.random() - 0.5) * 120
+      );
+      const explosionHeight = 25 + Math.random() * 20;
+      const explosionPos = origin.clone();
+      explosionPos.y = explosionHeight;
+
+      const particleCount = 80 + Math.floor(Math.random() * 60);
+      const positions = new Float32Array(particleCount * 3);
+      const velocities = new Float32Array(particleCount * 3);
+      const ages = new Float32Array(particleCount);
+
+      // 最初は全部 origin に
+      for (let i = 0; i < particleCount; i++) {
+        positions[i * 3] = origin.x;
+        positions[i * 3 + 1] = origin.y;
+        positions[i * 3 + 2] = origin.z;
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      const colorHex = FIREWORK_COLORS[Math.floor(Math.random() * FIREWORK_COLORS.length)];
+      const color = new THREE.Color(colorHex);
+      const material = new THREE.PointsMaterial({
+        color,
+        size: 0.5,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const points = new THREE.Points(geometry, material);
+      fireworksGroup.add(points);
+
+      fireworks.push({
+        points,
+        velocities,
+        ages,
+        lifetime: 1.8,
+        phase: "rising",
+        riseTimer: 0,
+        origin,
+        explosionPos,
+        color,
+      });
+    };
+
+    const updateFireworks = (delta: number) => {
+      // ランダム打ち上げ（平均 0.7 秒に 1 発）
+      if (Math.random() < delta / 0.7 && fireworks.length < 8) {
+        spawnFirework();
+      }
+
+      for (let i = fireworks.length - 1; i >= 0; i--) {
+        const fw = fireworks[i];
+        const positions = fw.points.geometry.attributes.position as THREE.BufferAttribute;
+        const arr = positions.array as Float32Array;
+        const count = arr.length / 3;
+
+        if (fw.phase === "rising") {
+          fw.riseTimer += delta;
+          // 0.6 秒で打ち上げ高度に到達
+          const riseDuration = 0.6;
+          const t = Math.min(1, fw.riseTimer / riseDuration);
+          // イーズアウト
+          const eased = 1 - Math.pow(1 - t, 2);
+          const currentY = fw.origin.y + (fw.explosionPos.y - fw.origin.y) * eased;
+          for (let p = 0; p < count; p++) {
+            arr[p * 3] = fw.explosionPos.x;
+            arr[p * 3 + 1] = currentY;
+            arr[p * 3 + 2] = fw.explosionPos.z;
+          }
+          positions.needsUpdate = true;
+
+          if (t >= 1) {
+            // 爆発フェーズへ
+            fw.phase = "exploding";
+            // ランダム方向に速度を割り当て（球状）
+            for (let p = 0; p < count; p++) {
+              const theta = Math.random() * Math.PI * 2;
+              const phi = Math.acos(2 * Math.random() - 1);
+              const speed = 6 + Math.random() * 6;
+              fw.velocities[p * 3] = speed * Math.sin(phi) * Math.cos(theta);
+              fw.velocities[p * 3 + 1] = speed * Math.cos(phi);
+              fw.velocities[p * 3 + 2] = speed * Math.sin(phi) * Math.sin(theta);
+              fw.ages[p] = 0;
+            }
+          }
+        } else {
+          // 爆発拡散 + 重力 + フェード
+          let maxAge = 0;
+          for (let p = 0; p < count; p++) {
+            fw.ages[p] += delta;
+            if (fw.ages[p] > maxAge) maxAge = fw.ages[p];
+            // 重力
+            fw.velocities[p * 3 + 1] -= 9.8 * delta;
+            // 空気抵抗
+            const drag = Math.pow(0.92, delta * 60);
+            fw.velocities[p * 3] *= drag;
+            fw.velocities[p * 3 + 1] *= drag;
+            fw.velocities[p * 3 + 2] *= drag;
+            arr[p * 3] += fw.velocities[p * 3] * delta;
+            arr[p * 3 + 1] += fw.velocities[p * 3 + 1] * delta;
+            arr[p * 3 + 2] += fw.velocities[p * 3 + 2] * delta;
+          }
+          positions.needsUpdate = true;
+
+          // フェードアウト
+          const fadeT = Math.min(1, maxAge / fw.lifetime);
+          (fw.points.material as THREE.PointsMaterial).opacity = 1 - fadeT;
+
+          if (maxAge >= fw.lifetime) {
+            fireworksGroup.remove(fw.points);
+            fw.points.geometry.dispose();
+            (fw.points.material as THREE.PointsMaterial).dispose();
+            fireworks.splice(i, 1);
+          }
+        }
+      }
+    };
+
     // カメラを中心に配置
     const newCamera = new THREE.PerspectiveCamera(
       90,
@@ -605,6 +871,12 @@ export function useThreeScene(): UseThreeSceneReturn {
 
       // ジェットコースターの自動走行
       coasterUpdater(delta);
+
+      // 観覧車の回転
+      ferrisUpdater(delta);
+
+      // 花火
+      updateFireworks(delta);
 
       // カスタムアニメーションコールバック
       if (animateCallbackRef.current) {
