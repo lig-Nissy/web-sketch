@@ -36,6 +36,19 @@ export function useCameraLook({ canvas, camera, modeRef, isDrawingRef }: UseCame
 
     const handlePointerMove = (e: PointerEvent) => {
       if (!isLooking) return;
+      // 右ボタンが離されているのに pointerup を取り逃したケースを救済
+      if ((e.buttons & 2) === 0) {
+        isLooking = false;
+        if (pointerId !== null) {
+          try {
+            canvas.releasePointerCapture(pointerId);
+          } catch {
+            /* noop */
+          }
+        }
+        pointerId = null;
+        return;
+      }
       e.preventDefault();
 
       const dx = e.clientX - lastX;

@@ -833,20 +833,25 @@ export function useThreeScene(): UseThreeSceneReturn {
     const controls = new OrbitControls(newCamera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.enableZoom = true;
-    controls.enablePan = true;
     controls.rotateSpeed = 0.5;
     controls.zoomSpeed = 1.0;
     controls.panSpeed = 0.8;
     controls.minDistance = 0.1;
     controls.maxDistance = 50;
     controls.target.set(0, 0, 0);
-    // draw モードでも左クリックは描画用なので、回転は右ドラッグに割り当てる（モード側で切替）
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.DOLLY,
       RIGHT: THREE.MOUSE.PAN,
     };
+    // 初期モード(draw)では OrbitControls を無効にしておく。
+    // three_canvas.tsx の mode useEffect は controls 生成より先に走るため、
+    // ここで disabled にしておかないと初回マウント時に左ドラッグで OrbitControls が
+    // 反応してしまい、描画とカメラ回転が混在する。
+    controls.enabled = false;
+    controls.enableRotate = false;
+    controls.enableZoom = false;
+    controls.enablePan = false;
     controlsRef.current = controls;
 
     // ============================================================

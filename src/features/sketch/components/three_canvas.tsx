@@ -78,7 +78,9 @@ export function ThreeCanvas() {
       cam.getWorldDirection(forward);
       controls.target.copy(cam.position).add(forward);
       controls.enabled = true;
+      controls.enableRotate = true;
       controls.enableZoom = true;
+      controls.enablePan = true;
       controls.mouseButtons = {
         LEFT: THREE.MOUSE.ROTATE,
         MIDDLE: THREE.MOUSE.DOLLY,
@@ -86,9 +88,13 @@ export function ThreeCanvas() {
       };
       controls.update();
     } else {
-      // それ以外（draw / select / object）: OrbitControls は無効。
-      // draw 中のカメラ回転は自前の FPS 風実装（use_camera_look）が担当。
+      // それ以外（draw / select / object）: OrbitControls を完全に無効化。
+      // enabled だけでは内部の pointer リスナーが副作用を起こすケースがあるので、
+      // 個別フラグも切って一切反応させない。
       controls.enabled = false;
+      controls.enableRotate = false;
+      controls.enableZoom = false;
+      controls.enablePan = false;
     }
   }, [mode, controlsRef]);
 
