@@ -8,7 +8,7 @@ const SketchPage = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="w-full h-screen flex items-center justify-center bg-[#1a1a2e] text-white">
+      <div className="w-full h-screen flex items-center justify-center bg-[#0a0a15] text-white">
         <div className="text-xl">Loading 3D Canvas...</div>
       </div>
     ),

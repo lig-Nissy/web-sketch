@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
+import RAPIER from "@dimforge/rapier3d-compat";
 import { useThreeScene } from "../hooks/use_three_scene";
 import { ControlPanel } from "./control_panel";
 import { HelpPanel } from "./help_panel";
@@ -18,7 +19,7 @@ export function ThreeCanvas() {
   const [objectType, setObjectType] = useState<ObjectType>("cube");
   const [objectGravity, setObjectGravity] = useState(false);
 
-  const { containerRef, canvas, scene, camera, controlsRef, raycastTargets, isDrawingRef, onAnimateRef, collisionCheckRef } = useThreeScene();
+  const { containerRef, canvas, scene, camera, controlsRef, raycastTargets, isDrawingRef, onAnimateRef, collisionCheckRef, physicsWorld, resetBowlingRef } = useThreeScene();
 
   const strokesRef = useRef<Stroke[]>([]);
   const objectsRef = useRef<PlacedObject[]>([]);
@@ -258,6 +259,23 @@ export function ThreeCanvas() {
       baseY: cow.position.y,
       steamInitialY: steamPositions.slice(),
     };
+
+    // 剛体もサイズを差し替え（重力 ON の牛のみ）
+    if (cow.rigidBody && physicsWorld) {
+      physicsWorld.removeRigidBody(cow.rigidBody);
+      const desc = RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(cow.position.x, cow.position.y, cow.position.z)
+        .setLinearDamping(0.5)
+        .setAngularDamping(0.8);
+      const newBody = physicsWorld.createRigidBody(desc);
+      const colliderDesc = RAPIER.ColliderDesc.cuboid(0.4, 0.1, 0.25)
+        .setRestitution(0.2)
+        .setFriction(0.8)
+        .setDensity(1);
+      const newCollider = physicsWorld.createCollider(colliderDesc, newBody);
+      cow.rigidBody = newBody;
+      cow.collider = newCollider;
+    }
   };
 
   // 牛と炎ストロークの衝突判定
@@ -333,104 +351,19 @@ export function ThreeCanvas() {
         }
       });
 
-      // オブジェクトのアニメーション
-      const GRAVITY = 0.01;
-      const FLOOR_Y = -5;
-
-      // オブジェクト同士の衝突判定関数
-      const checkObjectCollision = (obj1: PlacedObject, obj2: PlacedObject): THREE.Vector3 | null => {
-        if (obj1.id === obj2.id) return null;
-
-        const pos1 = obj1.position;
-        const pos2 = obj2.position;
-
-        // 両方が球の場合
-        if (obj1.boundingRadius && obj2.boundingRadius) {
-          const distance = pos1.distanceTo(pos2);
-          const minDist = obj1.boundingRadius + obj2.boundingRadius;
-          if (distance < minDist && distance > 0) {
-            const normal = new THREE.Vector3().subVectors(pos1, pos2).normalize();
-            return normal.multiplyScalar(minDist - distance);
-          }
-        }
-        // 両方がボックスの場合、または片方がボックスで片方が球の場合
-        else {
-          const box1 = obj1.boundingBox || { width: (obj1.boundingRadius || 0.5) * 2, height: (obj1.boundingRadius || 0.5) * 2, depth: (obj1.boundingRadius || 0.5) * 2 };
-          const box2 = obj2.boundingBox || { width: (obj2.boundingRadius || 0.5) * 2, height: (obj2.boundingRadius || 0.5) * 2, depth: (obj2.boundingRadius || 0.5) * 2 };
-
-          const dx = Math.abs(pos1.x - pos2.x);
-          const dy = Math.abs(pos1.y - pos2.y);
-          const dz = Math.abs(pos1.z - pos2.z);
-
-          const overlapX = (box1.width / 2 + box2.width / 2) - dx;
-          const overlapY = (box1.height / 2 + box2.height / 2) - dy;
-          const overlapZ = (box1.depth / 2 + box2.depth / 2) - dz;
-
-          if (overlapX > 0 && overlapY > 0 && overlapZ > 0) {
-            // 最小の重なり方向に押し出す
-            const pushDir = new THREE.Vector3();
-            if (overlapX <= overlapY && overlapX <= overlapZ) {
-              pushDir.x = pos1.x > pos2.x ? overlapX : -overlapX;
-            } else if (overlapY <= overlapX && overlapY <= overlapZ) {
-              pushDir.y = pos1.y > pos2.y ? overlapY : -overlapY;
-            } else {
-              pushDir.z = pos1.z > pos2.z ? overlapZ : -overlapZ;
-            }
-            return pushDir;
-          }
-        }
-        return null;
-      };
-
+      // Rapier の剛体 → メッシュ位置/姿勢に同期
       objectsRef.current.forEach((obj) => {
-        // 重力処理
-        if (obj.hasGravity && !obj.isGrounded) {
-          obj.velocity.y -= GRAVITY;
-          obj.position.y += obj.velocity.y;
-
-          // 床との衝突判定
-          const objHeight = obj.boundingBox ? obj.boundingBox.height / 2 : (obj.boundingRadius || 0.5);
-          const groundLevel = FLOOR_Y + objHeight;
-          if (obj.position.y <= groundLevel) {
-            obj.position.y = groundLevel;
-            obj.velocity.y = 0;
-            obj.isGrounded = true;
-          }
-
-          // 位置を更新
+        if (obj.rigidBody) {
+          const t = obj.rigidBody.translation();
+          const r = obj.rigidBody.rotation();
+          obj.position.set(t.x, t.y, t.z);
           if (obj.group) {
-            obj.group.position.copy(obj.position);
-            obj.animationData = { ...obj.animationData, baseY: obj.position.y };
+            obj.group.position.set(t.x, t.y, t.z);
+            obj.group.quaternion.set(r.x, r.y, r.z, r.w);
           }
           if (obj.mesh) {
-            obj.mesh.position.copy(obj.position);
-          }
-          if (obj.particles) {
-            // パーティクルの初期位置も更新
-            const initialPositions = obj.animationData?.initialPositions as Float32Array;
-            if (initialPositions) {
-              for (let i = 0; i < initialPositions.length / 3; i++) {
-                initialPositions[i * 3 + 1] += obj.velocity.y;
-              }
-            }
-          }
-        }
-
-        // オブジェクト同士の衝突判定（重力有効時のみ）
-        if (obj.hasGravity) {
-          for (const other of objectsRef.current) {
-            if (obj.id === other.id) continue;
-            const push = checkObjectCollision(obj, other);
-            if (push) {
-              // 上からの衝突は着地扱い
-              if (push.y > 0 && obj.velocity.y < 0) {
-                obj.velocity.y = 0;
-                obj.isGrounded = true;
-              }
-              obj.position.add(push.multiplyScalar(0.5));
-              if (obj.group) obj.group.position.copy(obj.position);
-              if (obj.mesh) obj.mesh.position.copy(obj.position);
-            }
+            obj.mesh.position.set(t.x, t.y, t.z);
+            obj.mesh.quaternion.set(r.x, r.y, r.z, r.w);
           }
         }
 
@@ -449,9 +382,9 @@ export function ThreeCanvas() {
             positions.needsUpdate = true;
           }
         } else if (obj.type === "cow" && obj.group) {
-          // 牛: ゆらゆら揺れる（重力中は揺れない）
-          obj.group.rotation.y = Math.sin(time * 2) * 0.1;
-          if (!obj.hasGravity || obj.isGrounded) {
+          // 牛: ゆらゆら揺れる（重力オフ＝静止配置の時のみ）
+          if (!obj.hasGravity) {
+            obj.group.rotation.y = Math.sin(time * 2) * 0.1;
             obj.group.position.y = (obj.animationData?.baseY as number || 0) + Math.sin(time * 3) * 0.1;
           }
 
@@ -491,7 +424,8 @@ export function ThreeCanvas() {
 
   // Canvas にイベントを直接アタッチ
   useEffect(() => {
-    if (!canvas || !scene || !camera) return;
+    if (!canvas || !scene || !camera || !physicsWorld) return;
+    const world = physicsWorld;
 
     const BOUNDARY = 48; // 描画可能な境界
 
@@ -639,6 +573,52 @@ export function ThreeCanvas() {
       setDrawDistance(prev => Math.max(2, Math.min(60, prev + delta)));
     };
 
+    // 剛体作成ヘルパー
+    // gravity=true: dynamic rigid body / false: fixed（その場に固定）
+    const createCuboidBody = (
+      position: THREE.Vector3,
+      halfExtents: { x: number; y: number; z: number },
+      gravity: boolean
+    ) => {
+      const desc = gravity
+        ? RAPIER.RigidBodyDesc.dynamic()
+            .setLinearDamping(0.5)
+            .setAngularDamping(0.8)
+        : RAPIER.RigidBodyDesc.fixed();
+      desc.setTranslation(position.x, position.y, position.z);
+      const body = world.createRigidBody(desc);
+      const colliderDesc = RAPIER.ColliderDesc.cuboid(
+        halfExtents.x,
+        halfExtents.y,
+        halfExtents.z
+      )
+        .setRestitution(0.25)
+        .setFriction(0.8)
+        .setDensity(1);
+      const collider = world.createCollider(colliderDesc, body);
+      return { body, collider };
+    };
+
+    const createBallBody = (
+      position: THREE.Vector3,
+      radius: number,
+      gravity: boolean
+    ) => {
+      const desc = gravity
+        ? RAPIER.RigidBodyDesc.dynamic()
+            .setLinearDamping(0.4)
+            .setAngularDamping(0.6)
+        : RAPIER.RigidBodyDesc.fixed();
+      desc.setTranslation(position.x, position.y, position.z);
+      const body = world.createRigidBody(desc);
+      const colliderDesc = RAPIER.ColliderDesc.ball(radius)
+        .setRestitution(0.4)
+        .setFriction(0.7)
+        .setDensity(1);
+      const collider = world.createCollider(colliderDesc, body);
+      return { body, collider };
+    };
+
     // 立方体を作成
     const createCube = (position: THREE.Vector3): PlacedObject => {
       const size = 3;
@@ -651,15 +631,22 @@ export function ThreeCanvas() {
       mesh.position.copy(position);
       scene.add(mesh);
 
+      const hasGravity = objectGravityRef.current;
+      const { body, collider } = createCuboidBody(
+        position,
+        { x: size / 2, y: size / 2, z: size / 2 },
+        hasGravity
+      );
+
       return {
         id: Math.random().toString(36).substring(2, 9),
         type: "cube",
         position: position.clone(),
         mesh,
         boundingBox: { width: size, height: size, depth: size },
-        hasGravity: objectGravityRef.current,
-        velocity: new THREE.Vector3(0, 0, 0),
-        isGrounded: false,
+        hasGravity,
+        rigidBody: body,
+        collider,
       };
     };
 
@@ -675,15 +662,22 @@ export function ThreeCanvas() {
       mesh.position.copy(position);
       scene.add(mesh);
 
+      const hasGravity = objectGravityRef.current;
+      const { body, collider } = createCuboidBody(
+        position,
+        { x: width / 2, y: height / 2, z: depth / 2 },
+        hasGravity
+      );
+
       return {
         id: Math.random().toString(36).substring(2, 9),
         type: "box",
         position: position.clone(),
         mesh,
         boundingBox: { width, height, depth },
-        hasGravity: objectGravityRef.current,
-        velocity: new THREE.Vector3(0, 0, 0),
-        isGrounded: false,
+        hasGravity,
+        rigidBody: body,
+        collider,
       };
     };
 
@@ -699,15 +693,18 @@ export function ThreeCanvas() {
       mesh.position.copy(position);
       scene.add(mesh);
 
+      const hasGravity = objectGravityRef.current;
+      const { body, collider } = createBallBody(position, radius, hasGravity);
+
       return {
         id: Math.random().toString(36).substring(2, 9),
         type: "sphere",
         position: position.clone(),
         mesh,
         boundingRadius: radius,
-        hasGravity: objectGravityRef.current,
-        velocity: new THREE.Vector3(0, 0, 0),
-        isGrounded: false,
+        hasGravity,
+        rigidBody: body,
+        collider,
       };
     };
 
@@ -765,9 +762,7 @@ export function ThreeCanvas() {
           initialPositions: positions.slice(), // 初期位置を保存
         },
         boundingRadius: 1.5,
-        hasGravity: objectGravityRef.current,
-        velocity: new THREE.Vector3(0, 0, 0),
-        isGrounded: false,
+        hasGravity: false, // 流れ星は物理に参加しない
       };
     };
 
@@ -778,9 +773,9 @@ export function ThreeCanvas() {
       // 体
       const bodyGeometry = new THREE.BoxGeometry(1.2, 0.8, 0.7);
       const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
-      const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-      body.position.y = 0.5;
-      group.add(body);
+      const cowBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+      cowBody.position.y = 0.5;
+      group.add(cowBody);
 
       // 頭
       const headGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
@@ -859,6 +854,20 @@ export function ThreeCanvas() {
       group.position.y = position.y;
       scene.add(group);
 
+      const hasGravity = objectGravityRef.current;
+      const cowSize = { width: 1.5, height: 1.2, depth: 0.8 };
+      let body: RAPIER.RigidBody | undefined;
+      let collider: RAPIER.Collider | undefined;
+      if (hasGravity) {
+        const created = createCuboidBody(
+          position,
+          { x: cowSize.width / 2, y: cowSize.height / 2, z: cowSize.depth / 2 },
+          true
+        );
+        body = created.body;
+        collider = created.collider;
+      }
+
       return {
         id: Math.random().toString(36).substring(2, 9),
         type: "cow",
@@ -867,10 +876,10 @@ export function ThreeCanvas() {
         animationData: {
           baseY: position.y,
         },
-        boundingBox: { width: 1.5, height: 1.2, depth: 0.8 },
-        hasGravity: objectGravityRef.current,
-        velocity: new THREE.Vector3(0, 0, 0),
-        isGrounded: false,
+        boundingBox: cowSize,
+        hasGravity,
+        rigidBody: body,
+        collider,
       };
     };
 
@@ -1270,8 +1279,29 @@ export function ThreeCanvas() {
       return null;
     };
 
+    // リセットボタンへのレイキャスト
+    const checkResetButtonHit = (clientX: number, clientY: number): boolean => {
+      const rect = canvas.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+      const buttonTargets = raycastTargetsRef.current.filter(t => t.userData.type === "bowlingReset");
+      const hits = raycaster.intersectObjects(buttonTargets, false);
+      return hits.length > 0;
+    };
+
     const handlePointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
+
+      // ボウリングリセットボタン（どのモードからでも反応）
+      if (checkResetButtonHit(e.clientX, e.clientY)) {
+        e.preventDefault();
+        resetBowlingRef.current?.();
+        return;
+      }
 
       // オブジェクトモード
       if (modeRef.current === "object") {
@@ -1399,7 +1429,8 @@ export function ThreeCanvas() {
       canvas.removeEventListener("pointercancel", handlePointerUp);
       canvas.removeEventListener("wheel", handleWheel);
     };
-  }, [canvas, scene, camera, isDrawingRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvas, scene, camera, physicsWorld]);
 
   // メッシュまたはグループを安全に破棄
   const disposeMesh = (obj: THREE.Object3D) => {
@@ -1447,6 +1478,9 @@ export function ThreeCanvas() {
       }
       if (obj.particles) {
         disposeMesh(obj.particles);
+      }
+      if (obj.rigidBody && physicsWorld) {
+        physicsWorld.removeRigidBody(obj.rigidBody);
       }
     });
     objectsRef.current = [];

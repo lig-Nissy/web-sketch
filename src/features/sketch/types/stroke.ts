@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type RAPIER from "@dimforge/rapier3d-compat";
 
 export type PenType = "normal" | "fire" | "star" | "mirror";
 export type ObjectType = "shooting_star" | "cow" | "steak" | "cube" | "box" | "sphere";
@@ -11,10 +12,10 @@ export interface PlacedObject {
   mesh?: THREE.Mesh;
   particles?: THREE.Points;
   animationData?: Record<string, unknown>;
-  // 重力関連
+  // 物理エンジン
   hasGravity: boolean;
-  velocity: THREE.Vector3;
-  isGrounded: boolean;
+  rigidBody?: RAPIER.RigidBody;
+  collider?: RAPIER.Collider;
   // 当たり判定用サイズ
   boundingBox?: { width: number; height: number; depth: number };
   boundingRadius?: number;
