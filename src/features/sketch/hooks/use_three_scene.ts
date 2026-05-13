@@ -841,6 +841,12 @@ export function useThreeScene(): UseThreeSceneReturn {
     controls.minDistance = 0.1;
     controls.maxDistance = 50;
     controls.target.set(0, 0, 0);
+    // draw モードでも左クリックは描画用なので、回転は右ドラッグに割り当てる（モード側で切替）
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.PAN,
+    };
     controlsRef.current = controls;
 
     // ============================================================
@@ -1163,8 +1169,8 @@ export function useThreeScene(): UseThreeSceneReturn {
       const t = strikeState.elapsed;
       const scale = 1 + 0.15 * Math.sin(t * 6);
       strikeBanner.scale.set(scale, scale, scale);
-      // 常にカメラ向き
-      strikeBanner.lookAt(newCamera.position);
+      // 常にカメラ向き（ビルボード: PlaneGeometry の +Z 表面をカメラに向ける）
+      strikeBanner.quaternion.copy(newCamera.quaternion);
 
       // 紙吹雪: 物理シミュレーション（重力 + 抗力）
       const positions = confettiGeometry.attributes.position as THREE.BufferAttribute;
@@ -1240,8 +1246,9 @@ export function useThreeScene(): UseThreeSceneReturn {
       resetBowling();
     };
     const updateResetButton = (delta: number) => {
-      // 常にカメラ正対 + ふわふわ上下
-      resetText.lookAt(newCamera.position);
+      // 常にカメラ正対（ビルボード）+ ふわふわ上下。
+      // PlaneGeometry の +Z 面がカメラを向くよう、カメラと同じ姿勢をコピーする。
+      resetText.quaternion.copy(newCamera.quaternion);
       const floatY = Math.sin(performance.now() * 0.002) * 0.2;
       resetText.position.y = resetTextBaseY + floatY;
 
@@ -1907,7 +1914,12 @@ export function useThreeScene(): UseThreeSceneReturn {
       }
 
       setCameraPosition(newCamera.position.clone());
-      controls.update();
+      // controls.enabled=false の時は update() を呼ばない。
+      // 呼ぶと damping や target の残留状態でカメラ姿勢が引き戻され、
+      // draw モードの自前ルック（use_camera_look）と競合する。
+      if (controls.enabled) {
+        controls.update();
+      }
       renderer.render(newScene, newCamera);
     };
     animate();
