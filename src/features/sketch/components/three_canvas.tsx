@@ -25,6 +25,7 @@ export function ThreeCanvas() {
   const [penType, setPenType] = useState<PenType>("normal");
   const [objectType, setObjectType] = useState<ObjectType>("cube");
   const [objectGravity, setObjectGravity] = useState(false);
+  const [objectScale, setObjectScale] = useState(1.0);
   const [selectedStroke, setSelectedStroke] = useState<Stroke | null>(null);
 
   const {
@@ -55,6 +56,7 @@ export function ThreeCanvas() {
   const penTypeRef = useRef(penType);
   const objectTypeRef = useRef(objectType);
   const objectGravityRef = useRef(objectGravity);
+  const objectScaleRef = useRef(objectScale);
   const raycastTargetsRef = useRef<THREE.Mesh[]>([]);
 
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -64,6 +66,7 @@ export function ThreeCanvas() {
   useEffect(() => { penTypeRef.current = penType; }, [penType]);
   useEffect(() => { objectTypeRef.current = objectType; }, [objectType]);
   useEffect(() => { objectGravityRef.current = objectGravity; }, [objectGravity]);
+  useEffect(() => { objectScaleRef.current = objectScale; }, [objectScale]);
   useEffect(() => { selectedStrokeRef.current = selectedStroke; }, [selectedStroke]);
   useEffect(() => { raycastTargetsRef.current = raycastTargets; }, [raycastTargets]);
 
@@ -135,6 +138,7 @@ export function ThreeCanvas() {
     penTypeRef,
     objectTypeRef,
     objectGravityRef,
+    objectScaleRef,
     setDrawDistance,
     setSelectedStroke,
     setMode,
@@ -172,6 +176,8 @@ export function ThreeCanvas() {
         setObjectType={setObjectType}
         objectGravity={objectGravity}
         setObjectGravity={setObjectGravity}
+        objectScale={objectScale}
+        setObjectScale={setObjectScale}
         onClear={clearAll}
       />
 

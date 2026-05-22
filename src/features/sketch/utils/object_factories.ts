@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import type { PlacedObject, ObjectType } from "../types";
+import { isMirrorColor } from "../types";
 import { createCuboidBody, createBallBody } from "./physics_bodies";
+import { createMirrorMaterial } from "./stroke_mesh";
 
 const newId = () => Math.random().toString(36).substring(2, 9);
 
@@ -10,12 +12,19 @@ interface FactoryContext {
   world: RAPIER.World;
   color: string;
   hasGravity: boolean;
+  scale?: number;
 }
 
+const createSolidMaterial = (color: string): THREE.Material =>
+  isMirrorColor(color)
+    ? createMirrorMaterial()
+    : new THREE.MeshPhongMaterial({ color, shininess: 100 });
+
 export const createCube = (position: THREE.Vector3, ctx: FactoryContext): PlacedObject => {
-  const size = 3;
+  const scale = ctx.scale ?? 1;
+  const size = 3 * scale;
   const geometry = new THREE.BoxGeometry(size, size, size);
-  const material = new THREE.MeshPhongMaterial({ color: ctx.color, shininess: 100 });
+  const material = createSolidMaterial(ctx.color);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.copy(position);
   ctx.scene.add(mesh);
@@ -40,11 +49,12 @@ export const createCube = (position: THREE.Vector3, ctx: FactoryContext): Placed
 };
 
 export const createBox = (position: THREE.Vector3, ctx: FactoryContext): PlacedObject => {
-  const width = 5,
-    height = 2,
-    depth = 3;
+  const scale = ctx.scale ?? 1;
+  const width = 5 * scale,
+    height = 2 * scale,
+    depth = 3 * scale;
   const geometry = new THREE.BoxGeometry(width, height, depth);
-  const material = new THREE.MeshPhongMaterial({ color: ctx.color, shininess: 100 });
+  const material = createSolidMaterial(ctx.color);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.copy(position);
   ctx.scene.add(mesh);
@@ -69,9 +79,10 @@ export const createBox = (position: THREE.Vector3, ctx: FactoryContext): PlacedO
 };
 
 export const createSphere = (position: THREE.Vector3, ctx: FactoryContext): PlacedObject => {
-  const radius = 1.5;
+  const scale = ctx.scale ?? 1;
+  const radius = 1.5 * scale;
   const geometry = new THREE.SphereGeometry(radius, 32, 32);
-  const material = new THREE.MeshPhongMaterial({ color: ctx.color, shininess: 100 });
+  const material = createSolidMaterial(ctx.color);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.copy(position);
   ctx.scene.add(mesh);
@@ -91,6 +102,7 @@ export const createSphere = (position: THREE.Vector3, ctx: FactoryContext): Plac
 };
 
 export const createShootingStar = (position: THREE.Vector3, ctx: FactoryContext): PlacedObject => {
+  const scale = ctx.scale ?? 1;
   const particleCount = 50;
   const positions = new Float32Array(particleCount * 3);
   const colors = new Float32Array(particleCount * 3);
@@ -104,8 +116,8 @@ export const createShootingStar = (position: THREE.Vector3, ctx: FactoryContext)
 
   for (let i = 0; i < particleCount; i++) {
     const t = i / particleCount;
-    positions[i * 3] = position.x - t * 2;
-    positions[i * 3 + 1] = position.y + t * 2;
+    positions[i * 3] = position.x - t * 2 * scale;
+    positions[i * 3 + 1] = position.y + t * 2 * scale;
     positions[i * 3 + 2] = position.z;
 
     const color = starColors[Math.floor(Math.random() * starColors.length)];
@@ -113,7 +125,7 @@ export const createShootingStar = (position: THREE.Vector3, ctx: FactoryContext)
     colors[i * 3 + 1] = color.g;
     colors[i * 3 + 2] = color.b;
 
-    sizes[i] = 0.1 + Math.random() * 0.2;
+    sizes[i] = (0.1 + Math.random() * 0.2) * scale;
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -122,7 +134,7 @@ export const createShootingStar = (position: THREE.Vector3, ctx: FactoryContext)
   geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
 
   const material = new THREE.PointsMaterial({
-    size: 0.3,
+    size: 0.3 * scale,
     vertexColors: true,
     transparent: true,
     opacity: 0.9,
@@ -139,12 +151,13 @@ export const createShootingStar = (position: THREE.Vector3, ctx: FactoryContext)
     position: position.clone(),
     particles,
     animationData: { initialPositions: positions.slice() },
-    boundingRadius: 1.5,
+    boundingRadius: 1.5 * scale,
     hasGravity: false,
   };
 };
 
 export const createCow = (position: THREE.Vector3, ctx: FactoryContext): PlacedObject => {
+  const scale = ctx.scale ?? 1;
   const group = new THREE.Group();
 
   const bodyGeometry = new THREE.BoxGeometry(1.2, 0.8, 0.7);
@@ -220,9 +233,10 @@ export const createCow = (position: THREE.Vector3, ctx: FactoryContext): PlacedO
   group.add(tail);
 
   group.position.copy(position);
+  group.scale.setScalar(scale);
   ctx.scene.add(group);
 
-  const cowSize = { width: 1.5, height: 1.2, depth: 0.8 };
+  const cowSize = { width: 1.5 * scale, height: 1.2 * scale, depth: 0.8 * scale };
   let body: RAPIER.RigidBody | undefined;
   let collider: RAPIER.Collider | undefined;
   if (ctx.hasGravity) {

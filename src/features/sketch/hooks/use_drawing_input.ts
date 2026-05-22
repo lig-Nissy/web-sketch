@@ -42,6 +42,7 @@ interface UseDrawingInputArgs {
   penTypeRef: RefObject<PenType>;
   objectTypeRef: RefObject<ObjectType>;
   objectGravityRef: RefObject<boolean>;
+  objectScaleRef: RefObject<number>;
 
   setDrawDistance: (updater: (prev: number) => number) => void;
   setSelectedStroke: (s: Stroke | null) => void;
@@ -70,6 +71,7 @@ export function useDrawingInput(args: UseDrawingInputArgs) {
     penTypeRef,
     objectTypeRef,
     objectGravityRef,
+    objectScaleRef,
     setDrawDistance,
     setSelectedStroke,
     setMode,
@@ -152,6 +154,7 @@ export function useDrawingInput(args: UseDrawingInputArgs) {
         world,
         color: currentColorRef.current,
         hasGravity: objectGravityRef.current,
+        scale: objectScaleRef.current,
       });
       objectsRef.current.push(obj);
     };

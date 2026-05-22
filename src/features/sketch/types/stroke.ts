@@ -1,7 +1,10 @@
 import * as THREE from "three";
 import type RAPIER from "@dimforge/rapier3d-compat";
 
-export type PenType = "normal" | "fire" | "star" | "mirror";
+export type PenType = "normal" | "fire" | "star";
+
+export const MIRROR_COLOR = "mirror";
+export const isMirrorColor = (color: string): boolean => color === MIRROR_COLOR;
 export type ObjectType = "shooting_star" | "cow" | "steak" | "cube" | "box" | "sphere";
 
 export interface PlacedObject {

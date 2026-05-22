@@ -1,6 +1,7 @@
 "use client";
 
 import type { PenType, ObjectType } from "../types";
+import { MIRROR_COLOR } from "../types";
 
 type Mode = "draw" | "select" | "camera" | "object";
 
@@ -8,7 +9,6 @@ const PEN_TYPES: { type: PenType; label: string; icon: string }[] = [
   { type: "normal", label: "通常", icon: "✏️" },
   { type: "fire", label: "炎", icon: "🔥" },
   { type: "star", label: "星", icon: "✨" },
-  { type: "mirror", label: "鏡", icon: "🪞" },
 ];
 
 const OBJECT_TYPES: { type: ObjectType; label: string; icon: string }[] = [
@@ -45,6 +45,8 @@ interface ControlPanelProps {
   setObjectType: (value: ObjectType) => void;
   objectGravity: boolean;
   setObjectGravity: (value: boolean) => void;
+  objectScale: number;
+  setObjectScale: (value: number) => void;
   onClear: () => void;
 }
 
@@ -63,6 +65,8 @@ export function ControlPanel({
   setObjectType,
   objectGravity,
   setObjectGravity,
+  objectScale,
+  setObjectScale,
   onClear,
 }: ControlPanelProps) {
   return (
@@ -189,32 +193,65 @@ export function ControlPanel({
               style={{ backgroundColor: color }}
             />
           ))}
+          {/* 鏡（特殊カラー） */}
+          <button
+            onClick={() => setCurrentColor(MIRROR_COLOR)}
+            className={`w-8 h-8 rounded-full transition-transform hover:scale-110 flex items-center justify-center text-base ${
+              currentColor === MIRROR_COLOR
+                ? "ring-2 ring-white ring-offset-2 ring-offset-black"
+                : ""
+            }`}
+            style={{
+              background:
+                "linear-gradient(135deg, #e8e8ff 0%, #ffffff 40%, #b8b8d0 60%, #ffffff 100%)",
+            }}
+            title="鏡"
+          >
+            🪞
+          </button>
         </div>
         {/* カスタムカラーピッカー */}
         <div className="flex items-center gap-2 mt-3">
           <input
             type="color"
-            value={currentColor}
+            value={currentColor === MIRROR_COLOR ? "#ffffff" : currentColor}
             onChange={(e) => setCurrentColor(e.target.value)}
             className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent"
           />
-          <span className="text-white text-xs">{currentColor}</span>
+          <span className="text-white text-xs">
+            {currentColor === MIRROR_COLOR ? "🪞 鏡" : currentColor}
+          </span>
         </div>
       </div>
 
-      {/* 太さスライダー */}
-      <div className="bg-black/50 p-3 rounded-lg text-white text-sm">
-        <label className="block mb-2">線の太さ: {thickness.toFixed(2)}</label>
-        <input
-          type="range"
-          min="0.05"
-          max="0.5"
-          step="0.05"
-          value={thickness}
-          onChange={(e) => setThickness(parseFloat(e.target.value))}
-          className="w-full"
-        />
-      </div>
+      {/* 太さ / 大きさスライダー（モードで切り替え） */}
+      {mode === "object" ? (
+        <div className="bg-black/50 p-3 rounded-lg text-white text-sm">
+          <label className="block mb-2">大きさ: {objectScale.toFixed(1)}x</label>
+          <input
+            type="range"
+            min="0.3"
+            max="3"
+            step="0.1"
+            value={objectScale}
+            onChange={(e) => setObjectScale(parseFloat(e.target.value))}
+            className="w-full"
+          />
+        </div>
+      ) : (
+        <div className="bg-black/50 p-3 rounded-lg text-white text-sm">
+          <label className="block mb-2">線の太さ: {thickness.toFixed(2)}</label>
+          <input
+            type="range"
+            min="0.05"
+            max="0.5"
+            step="0.05"
+            value={thickness}
+            onChange={(e) => setThickness(parseFloat(e.target.value))}
+            className="w-full"
+          />
+        </div>
+      )}
 
       {/* 描画距離スライダー */}
       <div className="bg-black/50 p-3 rounded-lg text-white text-sm">

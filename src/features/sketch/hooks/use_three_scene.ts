@@ -829,6 +829,19 @@ export function useThreeScene(): UseThreeSceneReturn {
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
+    // 環境マップ（鏡ペン用）: CubeCamera で夜空・観覧車などを撮影して scene.environment に流し込む
+    const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(256, {
+      generateMipmaps: true,
+      minFilter: THREE.LinearMipmapLinearFilter,
+    });
+    const cubeCamera = new THREE.CubeCamera(0.1, 1000, cubeRenderTarget);
+    newScene.add(cubeCamera);
+    const updateEnvMap = () => {
+      cubeCamera.position.copy(newCamera.position);
+      cubeCamera.update(renderer, newScene);
+      newScene.environment = cubeRenderTarget.texture;
+    };
+
     // OrbitControls
     const controls = new OrbitControls(newCamera, renderer.domElement);
     controls.enableDamping = true;
@@ -1726,12 +1739,25 @@ export function useThreeScene(): UseThreeSceneReturn {
     const PHYSICS_STEP = 1 / 60;
     let stopped = false;
     loopStoppersRef.current.push(() => { stopped = true; });
+    let envMapInitialized = false;
+    let envMapTimer = 0;
     const animate = () => {
       if (stopped) return;
       requestAnimationFrame(animate);
 
+      if (!envMapInitialized) {
+        updateEnvMap();
+        envMapInitialized = true;
+      }
+
       const delta = clock.getDelta();
       const elapsed = clock.elapsedTime;
+
+      envMapTimer += delta;
+      if (envMapTimer > 1.5) {
+        envMapTimer = 0;
+        updateEnvMap();
+      }
 
       // 物理ボディが解放されている可能性があるので try/catch で防御
       try {

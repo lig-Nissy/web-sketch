@@ -1,8 +1,21 @@
 import * as THREE from "three";
 import type { Stroke } from "../types";
+import { isMirrorColor } from "../types";
 import { disposeObject3D } from "./three_dispose";
 
+export const createMirrorMaterial = (): THREE.MeshStandardMaterial =>
+  new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    metalness: 0.95,
+    roughness: 0.15,
+    envMapIntensity: 2.0,
+    side: THREE.DoubleSide,
+  });
+
 export const createStrokeMaterial = (stroke: Stroke, scene: THREE.Scene): THREE.Material => {
+  if (isMirrorColor(stroke.color)) {
+    return createMirrorMaterial();
+  }
   switch (stroke.penType) {
     case "fire":
       return new THREE.MeshPhongMaterial({
@@ -22,15 +35,6 @@ export const createStrokeMaterial = (stroke: Stroke, scene: THREE.Scene): THREE.
         shininess: 200,
         specular: 0xffffff,
         side: THREE.DoubleSide,
-      });
-    case "mirror":
-      return new THREE.MeshPhongMaterial({
-        color: stroke.color,
-        shininess: 300,
-        specular: 0xffffff,
-        reflectivity: 1,
-        side: THREE.DoubleSide,
-        envMap: scene.environment,
       });
     default:
       return new THREE.MeshPhongMaterial({
@@ -175,20 +179,23 @@ export const updateStrokeMesh = (stroke: Stroke, scene: THREE.Scene) => {
   endCap.position.copy(endPoint);
   endCap.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), endTangent);
 
-  if (stroke.penType === "fire") {
-    const particles = createFireParticles(stroke, curve);
-    stroke.particles = particles;
-    scene.add(particles);
-    const group = new THREE.Group();
-    stroke.mesh = group as unknown as THREE.Mesh;
-    return;
-  } else if (stroke.penType === "star") {
-    const particles = createStarParticles(stroke, curve);
-    stroke.particles = particles;
-    scene.add(particles);
-    const group = new THREE.Group();
-    stroke.mesh = group as unknown as THREE.Mesh;
-    return;
+  // 鏡色のときは fire/star でもチューブとして描画（パーティクルは鏡化できないため）
+  if (!isMirrorColor(stroke.color)) {
+    if (stroke.penType === "fire") {
+      const particles = createFireParticles(stroke, curve);
+      stroke.particles = particles;
+      scene.add(particles);
+      const group = new THREE.Group();
+      stroke.mesh = group as unknown as THREE.Mesh;
+      return;
+    } else if (stroke.penType === "star") {
+      const particles = createStarParticles(stroke, curve);
+      stroke.particles = particles;
+      scene.add(particles);
+      const group = new THREE.Group();
+      stroke.mesh = group as unknown as THREE.Mesh;
+      return;
+    }
   }
 
   const group = new THREE.Group();
