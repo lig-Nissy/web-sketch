@@ -24,6 +24,7 @@ interface UseThreeSceneReturn {
   physicsWorld: RAPIER.World | null;
   rapierReady: boolean;
   resetBowlingRef: React.RefObject<(() => void) | null>;
+  startChinchiroRef: React.RefObject<(() => void) | null>;
 }
 
 // 球面レイヤー（視覚的なガイド用）- 現在は非表示
@@ -47,6 +48,7 @@ export function useThreeScene(): UseThreeSceneReturn {
   const pendingContainerRef = useRef<HTMLDivElement | null>(null);
   const loopStoppersRef = useRef<Array<() => void>>([]);
   const resetBowlingRef = useRef<(() => void) | null>(null);
+  const startChinchiroRef = useRef<(() => void) | null>(null);
 
   // Rapier の WASM を一度だけ読み込む
   useEffect(() => {
@@ -1290,6 +1292,362 @@ export function useThreeScene(): UseThreeSceneReturn {
     resetBowlingRef.current = pressResetButton;
 
     // ============================================================
+    // チンチロコーナー（西側、ボウリングの反対）
+    // ============================================================
+    const CHINCHIRO_BASE_X = -30;
+    const CHINCHIRO_BASE_Z = 20;
+
+    // --- おわん（椀型: 外側大シリンダー + 内側くり抜き風に底板） ---
+    const bowlGroup = new THREE.Group();
+    const bowlMat = new THREE.MeshPhongMaterial({ color: 0x8b4513, shininess: 60, side: THREE.DoubleSide });
+
+    // 外壁（大きい円柱、上面なし → openEnded）
+    const outerWall = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.0, 1.6, 2.0, 32, 1, true),
+      bowlMat
+    );
+    bowlGroup.add(outerWall);
+    // 底板
+    const bowlBottom = new THREE.Mesh(
+      new THREE.CircleGeometry(1.6, 32),
+      bowlMat
+    );
+    bowlBottom.rotation.x = -Math.PI / 2;
+    bowlBottom.position.y = -1.0;
+    bowlGroup.add(bowlBottom);
+    // 内壁（すこし小さめ）
+    const innerWall = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.85, 1.5, 2.0, 32, 1, true),
+      bowlMat
+    );
+    innerWall.scale.set(-1, 1, 1); // 法線を内側に
+    bowlGroup.add(innerWall);
+
+    bowlGroup.position.set(CHINCHIRO_BASE_X, FLOOR_TOP_Y + 1.1, CHINCHIRO_BASE_Z);
+    newScene.add(bowlGroup);
+
+    // おわん物理: 底面 + 4枚壁を別々の fixed ボディで構成
+    const bowlCenterY = FLOOR_TOP_Y + 1.1;
+    // 底
+    const bowlBottomBody = world.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(CHINCHIRO_BASE_X, bowlCenterY - 1.0, CHINCHIRO_BASE_Z)
+    );
+    world.createCollider(
+      RAPIER.ColliderDesc.cylinder(0.1, 1.55).setFriction(0.9).setRestitution(0.3),
+      bowlBottomBody
+    );
+    // 8枚壁（45度ずつ配置して隙間をなくす）
+    const WALL_COUNT = 8;
+    for (let i = 0; i < WALL_COUNT; i++) {
+      const angle = (i / WALL_COUNT) * Math.PI * 2;
+      const wx = CHINCHIRO_BASE_X + Math.cos(angle) * 1.72;
+      const wz = CHINCHIRO_BASE_Z + Math.sin(angle) * 1.72;
+      const wallBody = world.createRigidBody(
+        RAPIER.RigidBodyDesc.fixed().setTranslation(wx, bowlCenterY - 0.3, wz)
+      );
+      const sinHalf = Math.sin(angle / 2);
+      const cosHalf = Math.cos(angle / 2);
+      world.createCollider(
+        RAPIER.ColliderDesc.cuboid(0.12, 1.3, 0.72)
+          .setRotation({ x: 0, y: sinHalf, z: 0, w: cosHalf })
+          .setFriction(0.7)
+          .setRestitution(0.4),
+        wallBody
+      );
+    }
+
+    // サイコロ3個
+    const DICE_SIZE = 0.5;
+
+    // 各面のドット配置（UV座標 0〜1）
+    // BoxGeometry の面順: +X, -X, +Y, -Y, +Z, -Z → 目の数: 右3, 左4, 上6, 下1, 前5, 後2
+    const DICE_FACE_DOTS: Array<[number, number][]> = [
+      [[0.5,0.25],[0.5,0.5],[0.5,0.75]],                                              // +X: 3
+      [[0.25,0.25],[0.75,0.25],[0.25,0.75],[0.75,0.75]],                             // -X: 4
+      [[0.25,0.25],[0.75,0.25],[0.25,0.5],[0.75,0.5],[0.25,0.75],[0.75,0.75]],       // +Y: 6
+      [[0.5,0.5]],                                                                     // -Y: 1
+      [[0.25,0.25],[0.75,0.25],[0.5,0.5],[0.25,0.75],[0.75,0.75]],                   // +Z: 5
+      [[0.25,0.75],[0.75,0.25]],                                                       // -Z: 2
+    ];
+
+    const makeDiceFaceMaterial = (dots: [number, number][], isOne: boolean): THREE.MeshPhongMaterial => {
+      const size = 128;
+      const c = document.createElement("canvas");
+      c.width = size; c.height = size;
+      const ctx = c.getContext("2d")!;
+      ctx.fillStyle = "#f0f0f0";
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = isOne ? "#e74c3c" : "#222";
+      const r = size * 0.1;
+      dots.forEach(([u, v]) => {
+        ctx.beginPath();
+        ctx.arc(u * size, v * size, r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      return new THREE.MeshPhongMaterial({
+        map: new THREE.CanvasTexture(c),
+        shininess: 60,
+      });
+    };
+
+    const makeDiceMesh = (): THREE.Mesh => {
+      // DICE_FACE_DOTS の順: +X:3, -X:4, +Y:6, -Y:1, +Z:5, -Z:2 → インデックス3が1の面
+      const mats = DICE_FACE_DOTS.map((dots, i) => makeDiceFaceMaterial(dots, i === 3));
+      return new THREE.Mesh(new THREE.BoxGeometry(DICE_SIZE, DICE_SIZE, DICE_SIZE), mats);
+    };
+
+    const diceInitialPositions = [
+      new THREE.Vector3(CHINCHIRO_BASE_X - 0.5, FLOOR_TOP_Y + 5.0, CHINCHIRO_BASE_Z - 0.3),
+      new THREE.Vector3(CHINCHIRO_BASE_X,       FLOOR_TOP_Y + 6.5, CHINCHIRO_BASE_Z + 0.2),
+      new THREE.Vector3(CHINCHIRO_BASE_X + 0.5, FLOOR_TOP_Y + 5.5, CHINCHIRO_BASE_Z - 0.1),
+    ];
+
+    const chinchiroDice: Array<{ mesh: THREE.Mesh; body: RAPIER.RigidBody }> = [];
+    for (let i = 0; i < 3; i++) {
+      const mesh = makeDiceMesh();
+      const pos = diceInitialPositions[i];
+      mesh.position.copy(pos);
+      newScene.add(mesh);
+
+      const diceBody = world.createRigidBody(
+        RAPIER.RigidBodyDesc.dynamic()
+          .setTranslation(pos.x, pos.y, pos.z)
+          .setLinearDamping(0.3)
+          .setAngularDamping(0.4)
+          .setSleeping(true)
+      );
+      world.createCollider(
+        RAPIER.ColliderDesc.cuboid(DICE_SIZE / 2, DICE_SIZE / 2, DICE_SIZE / 2)
+          .setRestitution(0.4)
+          .setFriction(0.6)
+          .setDensity(2),
+        diceBody
+      );
+      chinchiroDice.push({ mesh, body: diceBody });
+    }
+
+    // チンチロ状態管理
+    const chinchiroState = {
+      rolling: false,
+      elapsed: 0,
+      resultShown: false,
+    };
+
+    const throwDice = () => {
+      if (chinchiroState.rolling) return;
+      chinchiroState.rolling = true;
+      chinchiroState.elapsed = 0;
+      chinchiroState.resultShown = false;
+      chinchiroResultBanner.visible = false;
+
+      for (let i = 0; i < 3; i++) {
+        const { body } = chinchiroDice[i];
+        const pos = diceInitialPositions[i];
+        body.setTranslation({ x: pos.x, y: pos.y, z: pos.z }, true);
+        // ランダムな回転で投げ込む
+        const qRand = new RAPIER.Quaternion(
+          Math.random() - 0.5,
+          Math.random() - 0.5,
+          Math.random() - 0.5,
+          Math.random() - 0.5
+        );
+        const len = Math.sqrt(qRand.x ** 2 + qRand.y ** 2 + qRand.z ** 2 + qRand.w ** 2);
+        qRand.x /= len; qRand.y /= len; qRand.z /= len; qRand.w /= len;
+        body.setRotation(qRand, true);
+        body.setLinvel({ x: (Math.random() - 0.5) * 4, y: -3, z: (Math.random() - 0.5) * 4 }, true);
+        body.setAngvel({
+          x: (Math.random() - 0.5) * 20,
+          y: (Math.random() - 0.5) * 20,
+          z: (Math.random() - 0.5) * 20,
+        }, true);
+        body.wakeUp();
+      }
+    };
+
+    // サイコロの目読み取り（上向きの面を検出）
+    const readDiceValue = (body: RAPIER.RigidBody): number => {
+      const r = body.rotation();
+      const quat = new THREE.Quaternion(r.x, r.y, r.z, r.w);
+      // 各面の法線をワールド空間に変換して最もY+に近い面を探す
+      const faceNormals = [
+        new THREE.Vector3(0, 1, 0),   // top → 6
+        new THREE.Vector3(0, -1, 0),  // bottom → 1
+        new THREE.Vector3(1, 0, 0),   // right → 3
+        new THREE.Vector3(-1, 0, 0),  // left → 4
+        new THREE.Vector3(0, 0, 1),   // front → 5
+        new THREE.Vector3(0, 0, -1),  // back → 2
+      ];
+      const faceValues = [6, 1, 3, 4, 5, 2];
+      let maxDot = -Infinity;
+      let result = 1;
+      faceNormals.forEach((n, i) => {
+        const world = n.clone().applyQuaternion(quat);
+        if (world.y > maxDot) {
+          maxDot = world.y;
+          result = faceValues[i];
+        }
+      });
+      return result;
+    };
+
+    // チンチロ役判定
+    const judgeChinchinro = (dice: number[]): string => {
+      const sorted = [...dice].sort();
+      const [a, b, c] = sorted;
+      if (a === b && b === c) {
+        if (a === 1) return "🎯 ヒフミ（最強）";
+        return `🎲 ゾロ目 ${a}`;
+      }
+      if (a === 1 && b === 2 && c === 3) return "😈 ピンゾロ（最弱）";
+      if (a === 4 && b === 5 && c === 6) return "🏆 シゴロ（特殊）";
+      if (a === b) return `✨ 目: ${c}`;
+      if (b === c) return `✨ 目: ${a}`;
+      return "💀 目なし";
+    };
+
+    // 結果バナー
+    const chinchiroResultCanvas = document.createElement("canvas");
+    chinchiroResultCanvas.width = 640;
+    chinchiroResultCanvas.height = 200;
+    const crx = chinchiroResultCanvas.getContext("2d")!;
+    const chinchiroResultTexture = new THREE.CanvasTexture(chinchiroResultCanvas);
+    const chinchiroResultBanner = new THREE.Mesh(
+      new THREE.PlaneGeometry(10, 3.2),
+      new THREE.MeshBasicMaterial({
+        map: chinchiroResultTexture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+      })
+    );
+    chinchiroResultBanner.renderOrder = 999;
+    chinchiroResultBanner.position.set(CHINCHIRO_BASE_X, FLOOR_TOP_Y + 8, CHINCHIRO_BASE_Z);
+    chinchiroResultBanner.visible = false;
+    newScene.add(chinchiroResultBanner);
+
+    const showChinchinroResult = (text: string) => {
+      crx.clearRect(0, 0, 640, 200);
+      crx.font = "bold 70px sans-serif";
+      crx.textAlign = "center";
+      crx.textBaseline = "middle";
+      crx.strokeStyle = "#000";
+      crx.lineWidth = 10;
+      crx.strokeText(text, 320, 100);
+      crx.fillStyle = "#fff";
+      crx.fillText(text, 320, 100);
+      chinchiroResultTexture.needsUpdate = true;
+      chinchiroResultBanner.visible = true;
+      (chinchiroResultBanner.material as THREE.MeshBasicMaterial).opacity = 1;
+    };
+
+    // スタートボタン
+    const startBtnCanvas = document.createElement("canvas");
+    startBtnCanvas.width = 512;
+    startBtnCanvas.height = 160;
+    const sbx = startBtnCanvas.getContext("2d")!;
+    sbx.clearRect(0, 0, 512, 160);
+    sbx.font = "bold 88px sans-serif";
+    sbx.textAlign = "center";
+    sbx.textBaseline = "middle";
+    sbx.strokeStyle = "#000";
+    sbx.lineWidth = 8;
+    sbx.strokeText("🎲 スタート", 256, 80);
+    sbx.fillStyle = "#ffd700";
+    sbx.fillText("🎲 スタート", 256, 80);
+    const startBtnTexture = new THREE.CanvasTexture(startBtnCanvas);
+
+    const startBtnMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(5, 1.6),
+      new THREE.MeshBasicMaterial({
+        map: startBtnTexture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+      })
+    );
+    startBtnMesh.renderOrder = 998;
+    startBtnMesh.userData.type = "chinchinroStart";
+    const startBtnBaseY = FLOOR_TOP_Y + 7;
+    startBtnMesh.position.set(CHINCHIRO_BASE_X, startBtnBaseY, CHINCHIRO_BASE_Z);
+    newScene.add(startBtnMesh);
+    targets.push(startBtnMesh);
+
+    const startBtnAnim = { pressedT: 0 };
+    const pressChinchiroStart = () => {
+      startBtnAnim.pressedT = 0.001;
+      throwDice();
+    };
+
+    const syncChinchiro = () => {
+      for (const { mesh, body } of chinchiroDice) {
+        const t = body.translation();
+        const r = body.rotation();
+        mesh.position.set(t.x, t.y, t.z);
+        mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      }
+    };
+
+    const SETTLE_TIME = 2.5; // 投擲後この秒数後に結果読み取り
+    const updateChinchiro = (delta: number) => {
+      startBtnMesh.quaternion.copy(newCamera.quaternion);
+      const floatY = Math.sin(performance.now() * 0.0018) * 0.2;
+      startBtnMesh.position.y = startBtnBaseY + floatY;
+
+      if (startBtnAnim.pressedT > 0) {
+        startBtnAnim.pressedT += delta;
+        const t2 = startBtnAnim.pressedT;
+        let s = 1;
+        if (t2 < 0.15) s = 1 + (t2 / 0.15) * 0.3;
+        else if (t2 < 0.3) s = 1 + (1 - (t2 - 0.15) / 0.15) * 0.3;
+        else { s = 1; startBtnAnim.pressedT = 0; }
+        startBtnMesh.scale.set(s, s, s);
+      } else {
+        startBtnMesh.scale.set(1, 1, 1);
+      }
+
+      if (chinchiroState.rolling) {
+        chinchiroState.elapsed += delta;
+
+        // こぼれ判定: おわん上端より高く＆おわん外周より外に出たサイコロがあればアウト
+        const BOWL_TOP_WORLD_Y = bowlCenterY + 1.0;
+        const BOWL_OUT_RADIUS = 2.5;
+        if (!chinchiroState.resultShown && chinchiroState.elapsed > 0.5) {
+          const hasSpilled = chinchiroDice.some(({ body }) => {
+            const t = body.translation();
+            const dx = t.x - CHINCHIRO_BASE_X;
+            const dz = t.z - CHINCHIRO_BASE_Z;
+            const horizDist = Math.sqrt(dx * dx + dz * dz);
+            return t.y > BOWL_TOP_WORLD_Y && horizDist > BOWL_OUT_RADIUS;
+          });
+          if (hasSpilled) {
+            chinchiroState.resultShown = true;
+            showChinchinroResult("💀 アウト！（こぼれ）");
+          }
+        }
+
+        if (!chinchiroState.resultShown && chinchiroState.elapsed >= SETTLE_TIME) {
+          chinchiroState.resultShown = true;
+          const values = chinchiroDice.map(({ body }) => readDiceValue(body));
+          const result = judgeChinchinro(values);
+          showChinchinroResult(`${values.join(" - ")}  ${result}`);
+        }
+        // 全サイコロが静止したらrollingをfalseに
+        if (chinchiroState.resultShown) {
+          const allSleeping = chinchiroDice.every(({ body }) => body.isSleeping());
+          if (allSleeping || chinchiroState.elapsed > SETTLE_TIME + 3) {
+            chinchiroState.rolling = false;
+          }
+        }
+      }
+
+      if (chinchiroResultBanner.visible) {
+        chinchiroResultBanner.quaternion.copy(newCamera.quaternion);
+      }
+    };
+
+    startChinchiroRef.current = pressChinchiroStart;
+
+    // ============================================================
     // プレイヤー（カメラ）の物理ボディ — キネマティック
     // ============================================================
     // 既存のカメラ歩行系では「カメラ位置 = 足元」前提（collisionCheckRef 参照）。
@@ -1781,6 +2139,10 @@ export function useThreeScene(): UseThreeSceneReturn {
         syncBowling();
         updateResetButton(delta);
         updateStrike(delta);
+
+        // チンチロ同期
+        syncChinchiro();
+        updateChinchiro(delta);
       } catch (e) {
         // 物理エラーが起きてもループは継続（WASD は動かす）
         console.warn("[useThreeScene] physics step failed", e);
@@ -2002,5 +2364,6 @@ export function useThreeScene(): UseThreeSceneReturn {
     physicsWorld,
     rapierReady,
     resetBowlingRef,
+    startChinchiroRef,
   };
 }

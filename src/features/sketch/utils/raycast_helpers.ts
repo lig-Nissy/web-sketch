@@ -158,3 +158,15 @@ export const checkResetButtonHit = (
   const buttonTargets = raycastTargets.filter((t) => t.userData.type === "bowlingReset");
   return raycaster.intersectObjects(buttonTargets, false).length > 0;
 };
+
+export const checkChinchinroStartHit = (
+  canvas: HTMLCanvasElement,
+  camera: THREE.PerspectiveCamera,
+  raycastTargets: THREE.Mesh[],
+  clientX: number,
+  clientY: number
+): boolean => {
+  const raycaster = buildRaycaster(canvas, camera, clientX, clientY);
+  const buttonTargets = raycastTargets.filter((t) => t.userData.type === "chinchinroStart");
+  return raycaster.intersectObjects(buttonTargets, false).length > 0;
+};

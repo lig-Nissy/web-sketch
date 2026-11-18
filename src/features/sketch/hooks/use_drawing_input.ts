@@ -9,6 +9,7 @@ import {
   checkMarkerHit,
   checkStrokeHit,
   checkResetButtonHit,
+  checkChinchinroStartHit,
   updateStrokeMesh,
   createStrokeMarkers,
   removeStrokeMarkers,
@@ -27,6 +28,7 @@ interface UseDrawingInputArgs {
   raycastTargetsRef: RefObject<THREE.Mesh[]>;
   isDrawingRef: RefObject<boolean>;
   resetBowlingRef: RefObject<(() => void) | null>;
+  startChinchiroRef: RefObject<(() => void) | null>;
 
   strokesRef: RefObject<Stroke[]>;
   objectsRef: RefObject<PlacedObject[]>;
@@ -58,6 +60,7 @@ export function useDrawingInput(args: UseDrawingInputArgs) {
     raycastTargetsRef,
     isDrawingRef,
     resetBowlingRef,
+    startChinchiroRef,
     strokesRef,
     objectsRef,
     currentStrokeRef,
@@ -165,6 +168,12 @@ export function useDrawingInput(args: UseDrawingInputArgs) {
       if (checkResetButtonHit(canvas, camera, raycastTargetsRef.current, e.clientX, e.clientY)) {
         e.preventDefault();
         resetBowlingRef.current?.();
+        return;
+      }
+
+      if (checkChinchinroStartHit(canvas, camera, raycastTargetsRef.current, e.clientX, e.clientY)) {
+        e.preventDefault();
+        startChinchiroRef.current?.();
         return;
       }
 

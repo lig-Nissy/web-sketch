@@ -40,6 +40,7 @@ export function ThreeCanvas() {
     collisionCheckRef,
     physicsWorld,
     resetBowlingRef,
+    startChinchiroRef,
   } = useThreeScene();
 
   const strokesRef = useRef<Stroke[]>([]);
@@ -125,6 +126,7 @@ export function ThreeCanvas() {
     raycastTargetsRef,
     isDrawingRef,
     resetBowlingRef,
+    startChinchiroRef,
     strokesRef,
     objectsRef,
     currentStrokeRef,

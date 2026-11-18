@@ -13,6 +13,13 @@ interface UsePlayerCollisionArgs {
 const COLLISION_RADIUS = 0.5;
 const FLOOR_Y = -5;
 
+// チンチロおわんの静的コライダー情報（use_three_scene と同期）
+const BOWL_CENTER = new THREE.Vector3(-30, -3.9, 20); // CHINCHIRO_BASE_X, FLOOR_TOP_Y+1.1, Z
+const BOWL_OUTER_RADIUS = 2.0;
+const BOWL_INNER_RADIUS = 1.85;
+const BOWL_BOTTOM_Y = -5.0;  // 床面
+const BOWL_TOP_Y = -3.9;     // bowlCenterY + 1.1（おわん上端）
+
 export function usePlayerCollision({
   collisionCheckRef,
   strokesRef,
@@ -100,6 +107,29 @@ export function usePlayerCollision({
               return { collides: true };
             }
           }
+        }
+      }
+
+      // おわん衝突判定（円柱外壁）
+      const bowlDx = pos.x - BOWL_CENTER.x;
+      const bowlDz = pos.z - BOWL_CENTER.z;
+      const bowlHorizDist = Math.sqrt(bowlDx * bowlDx + bowlDz * bowlDz);
+      const inBowlHeight = actualFeetY < BOWL_TOP_Y && actualHeadY > BOWL_BOTTOM_Y;
+      if (inBowlHeight) {
+        // 外壁: おわん外周に近づいたら弾く
+        if (bowlHorizDist > BOWL_OUTER_RADIUS - COLLISION_RADIUS && bowlHorizDist < BOWL_OUTER_RADIUS + COLLISION_RADIUS * 2) {
+          return { collides: true };
+        }
+        // 内側から外に出ようとしているとき（おわんの中に落ちた場合）も弾く
+        if (bowlHorizDist < BOWL_INNER_RADIUS && actualFeetY < BOWL_TOP_Y) {
+          return { collides: true };
+        }
+      }
+      // おわん上端の上に乗れる
+      if (bowlHorizDist >= BOWL_OUTER_RADIUS - COLLISION_RADIUS && bowlHorizDist <= BOWL_OUTER_RADIUS + 0.3) {
+        const rimGroundY = BOWL_TOP_Y - FLOOR_Y;
+        if (groundY === undefined || rimGroundY > groundY) {
+          groundY = rimGroundY;
         }
       }
 

@@ -22,4 +22,5 @@ export {
   checkMarkerHit,
   checkStrokeHit,
   checkResetButtonHit,
+  checkChinchinroStartHit,
 } from "./raycast_helpers";
